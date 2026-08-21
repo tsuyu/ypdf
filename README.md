@@ -8,7 +8,7 @@ engine.
 
 ## Status
 
-**M12 — viewer, editor, CLI, encryption, OCR, watermarks, redaction, navigation, forms, and annotations.** Opens and renders PDFs:
+**M14a — viewer, editor, CLI, encryption, OCR, watermarks, redaction, navigation, forms, annotations, PDF/A checking, and signature verification.** Opens and renders PDFs:
 continuous scroll, zoom and fit modes, rotation, thumbnails, multiple tabs,
 inverted pages for dark reading, full-document search, text selection and copy,
 clickable links. Pages can be selected, reordered by dragging, rotated,
@@ -21,7 +21,10 @@ written back out. Scans can be made searchable with OCR, and pages can be
 stamped with a text or image watermark, and content can be redacted —
 removed from the file, not covered over. Bookmarks and links can be
 listed and edited, forms can be filled, cleared, and flattened, and a document can be
-marked up with highlights, notes, freehand ink, shapes, and stamps.
+marked up with highlights, notes, freehand ink, shapes, and stamps. A file can be checked
+against PDF/A — with the list of what that check does not cover printed beside the
+verdict — and digital signatures can be read and verified, including what each one
+actually covers.
 
 See [PLAN.md](PLAN.md) for the milestone plan and [pdf-tool-spec.md](pdf-tool-spec.md)
 for the full product specification.
@@ -42,6 +45,8 @@ for the full product specification.
 | `crates/ypdf-outline` | Bookmarks and links: reading and editing how a document is navigated |
 | `crates/ypdf-forms` | AcroForm fields: filling, clearing, flattening, and FDF/XFDF/JSON data |
 | `crates/ypdf-annot` | Annotations: highlights, notes, ink, shapes, and stamps, each with its own appearance |
+| `crates/ypdf-pdfa` | PDF/A checking: parts 1–3, levels a/b/u, and an explicit list of what is not checked |
+| `crates/ypdf-sign` | Digital signatures: CMS/PKCS#7 verification, certificate details, and byte-range coverage |
 | `crates/ypdf-cli` | Scriptable command line and batch processing (`ypdf-cli` binary) |
 | `apps/desktop` | egui desktop application (`ypdf` binary) |
 
@@ -144,6 +149,8 @@ ypdf-cli watermark report.pdf -o stamped.pdf --text CONFIDENTIAL --opacity 0.15
 ypdf-cli redact contract.pdf -o safe.pdf --find "account 12345678"
 ypdf-cli forms application.pdf --fill "name=Ada Lovelace" -o filled.pdf
 ypdf-cli annotate draft.pdf --highlight "1:72,700,300,720" --author Ada -o marked.pdf
+ypdf-cli pdfa archive.pdf --level 2b
+ypdf-cli signatures contract.pdf
 ypdf-cli bookmarks report.pdf
 ypdf-cli links ./inbox/*.pdf --json
 ypdf-cli security-scan ./inbox/*.pdf --fail-on high
@@ -288,6 +295,85 @@ to everything the command adds.
   becomes mojibake.
 - **Form fields and links are not annotations here.** They share the same array in the
   file, and `--remove-all` leaves them alone; clearing the array would destroy a form.
+
+## Digital signatures
+
+**Inspect → Signatures** shows what a document is signed with, or from the command line:
+
+```bash
+ypdf-cli signatures contract.pdf
+ypdf-cli signatures ./inbox/*.pdf --json
+ypdf-cli signatures contract.pdf --require-signed   # non-zero if it is not signed
+```
+
+A signature that verifies proves exactly one thing: **these bytes have not changed since
+someone signed them with the private key belonging to this certificate.** It does not prove
+who that someone is. There is no trust store here, and revocation checking (CRL, OCSP)
+needs network access this tool does not have — so every report ends with the list of what
+it did not establish, and nothing here will ever print a green tick that means "trusted".
+
+Four outcomes, kept separate because they mean different things:
+
+| Verdict | What happened |
+|---|---|
+| `intact` | the digest matches the bytes, and the signature over it verifies |
+| `document altered` | the bytes are not the bytes that were signed |
+| `signature does not verify` | the document is as signed; the signature is not the key holder's |
+| `not checked` | a real signature using something not implemented here — not a failure |
+
+**What a signature covers is checked as carefully as the cryptography.** Most signature
+fraud is not cryptographic. A file can carry a perfectly valid signature over an earlier,
+honest revision and a page of something else appended after it; the answer is *intact, and
+it does not cover the whole file*, with the byte count. Also reported: a range that does not
+start at the beginning of the file, a range reaching past its end, and a `/Contents` hole
+bigger than the signature sitting in it — room left over for content nobody signed.
+
+Read and reported: signer name, reason, location, claimed time, certification (DocMDP)
+signatures, empty signature fields, multiple signatures, timestamp tokens (reported, not
+verified), SHA-1 (verified, and flagged as no longer proving much), and the certificate's
+subject, issuer, serial, validity, and key.
+
+Signing — creating signatures rather than checking them — is the next milestone.
+
+## PDF/A
+
+**Inspect → PDF/A** checks the open document, or from the command line:
+
+```bash
+ypdf-cli pdfa archive.pdf                  # against the level the file claims
+ypdf-cli pdfa archive.pdf --level 2b       # against the level you require
+ypdf-cli pdfa ./archive/*.pdf --json       # exits non-zero if any file fails
+```
+
+Levels are `1a`, `1b`, `2a`, `2b`, `2u`, `3a`, `3b`, `3u`. A level that has never existed
+— `1u` — is refused rather than rounded to the nearest one.
+
+**What a pass means, exactly.** It means every check that ran passed. It does not mean the
+file conforms: PDF/A has several hundred requirements and this implements the structural
+ones. Every report ends with the list of what it did not look at, and says in as many words
+that passing is not a certificate. That list is the point of the feature — a tool that
+answers YES without it produces confident archives that are rejected on arrival.
+
+Checked here: PDF/A identification in XMP, and XMP agreeing with `/Info`; encryption; the
+file identifier; PDF version against the part; fonts embedded, including the standard
+fourteen; `/ToUnicode` for levels a and u; an output intent with its ICC profile, when the
+pages actually paint in device colour; JavaScript and actions that leave the document;
+attachments, which part 1 forbids, part 2 allows only if they are themselves PDF/A, and
+part 3 allows with an `/AFRelationship`; optional content; LZW; streams whose data lives in
+another file; `/NeedAppearances`; transparency and `/Interpolate`; tagging and `/Lang` for
+level a; annotation types, appearances, flags, and opacity.
+
+Not checked: the contents of ICC profiles, glyph coverage inside font programs,
+content-stream operators, structure-tree semantics, XMP schema validity, the full
+conformance of an attachment, halftones and transfer functions, and PDF/A-4.
+
+The rules differ by part, and so does the answer: transparency fails part 1 and is a
+feature of part 2; an attachment fails part 1 and passes part 3. Reporting a conforming
+feature as a fault is the same kind of bug as missing a real one.
+
+**Conversion to PDF/A is not offered.** It would mean embedding fonts the file does not
+carry and picking a colour profile on your behalf — changes to the document, made
+silently. This reports; it does not fix.
 
 ## Bookmarks and links
 

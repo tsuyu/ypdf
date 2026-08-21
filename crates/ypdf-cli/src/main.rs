@@ -140,6 +140,24 @@ fn run_batch(
                 commands::inspect::security_scan(path, threshold, password, cancel)
             })
         }
+        Command::Signatures(args) => {
+            let require_signed = args.require_signed;
+            batch::run(&files, workers, cancel, out, |path, cancel| {
+                commands::signatures::run(path, require_signed, password, cancel)
+            })
+        }
+        Command::Pdfa(args) => {
+            // Parsed once, before the batch: a level nobody can conform to is a
+            // mistake in the command, not a property of a thousand files.
+            let level = args
+                .level
+                .as_deref()
+                .map(ypdf_pdfa::Level::parse)
+                .transpose()?;
+            batch::run(&files, workers, cancel, out, |path, cancel| {
+                commands::pdfa::run(path, level, password, cancel)
+            })
+        }
         Command::Metadata(args) => batch::run(&files, workers, cancel, out, |path, cancel| {
             commands::inspect::metadata(path, args, password, many, overwrite, cancel)
         }),
@@ -203,6 +221,8 @@ fn inputs_of(command: &Command) -> &[String] {
     match command {
         Command::Info(args) | Command::Diagnostics(args) => &args.inputs,
         Command::SecurityScan(args) => &args.inputs,
+        Command::Signatures(args) => &args.inputs,
+        Command::Pdfa(args) => &args.inputs,
         Command::Metadata(args) => &args.inputs,
         Command::Compress(args) => &args.inputs,
         Command::Images(args) => &args.inputs,

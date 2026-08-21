@@ -7,8 +7,10 @@ pub mod navigate;
 pub mod ocr;
 pub mod optimize;
 pub mod pages;
+pub mod pdfa;
 pub mod protect;
 pub mod redact;
+pub mod signatures;
 pub mod watermark;
 
 use std::path::Path;

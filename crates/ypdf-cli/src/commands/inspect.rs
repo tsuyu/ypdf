@@ -92,10 +92,11 @@ pub fn diagnostics(
     }
 
     if let Some(claim) = &d.pdf_a_claim {
-        // A claim, not a verdict: validating it is spec §15 and another
-        // milestone. Saying "PDF/A-2b" flatly here would be asserting something
-        // nobody checked.
-        human.push_str(&format!("PDF/A:          claims {claim} (unverified)\n"));
+        // A claim, not a verdict: this line reports what the file says about
+        // itself, and `ypdf-cli pdfa` is the command that checks it.
+        human.push_str(&format!(
+            "PDF/A:          claims {claim} — checked by `ypdf-cli pdfa`\n"
+        ));
     }
 
     if d.issues.is_empty() {

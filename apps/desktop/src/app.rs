@@ -625,8 +625,10 @@ impl YpdfApp {
             return;
         }
 
+        let source = doc.edits.source().to_path_buf();
+        let edited = doc.edits.is_dirty();
         match doc.edits.replay().and_then(|pdf| {
-            doc.inspection.refresh(&pdf)?;
+            doc.inspection.refresh(&pdf, &source, edited)?;
             Ok(())
         }) {
             Ok(()) => {

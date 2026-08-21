@@ -702,13 +702,120 @@ it through real PDFium, and requires the pixels to have changed — and, for a h
 over the page's own text, requires the count of dark pixels not to drop, so a highlight
 cannot paint over the words it was meant to mark.
 
-### M13+ — Professional features, in difficulty order
-1. **PDF/A validation** (spec §15).
-2. **Digital signatures** (spec §9) — PAdES, CMS/PKCS#7, certificate management,
-   verification. Hardest single item in the spec; budget 4+ weeks on its own.
-3. **REST API** (spec §23, §24) — `apps/server`, axum + tokio, async job system reusing
+### M13 — PDF/A checking (spec §15) — DONE
+
+- [x] `ypdf-pdfa`: parts 1, 2, and 3, conformance levels a, b, and u, checked over the
+  whole object table rather than the page tree — a forbidden filter on a stream nobody
+  draws still makes the file non-conforming.
+- [x] **The honest verdict is the whole design.** The standard has several hundred
+  requirements; this implements the structural ones. Every report, pass or fail, prints
+  `LIMITS`: the list of what was *not* checked. A tool that answers YES without that list
+  produces confident archives that get rejected at the archive's door, which is worse than
+  having no tool.
+- [x] The result field is called `passed`, never `compliant`, for the same reason. Nothing
+  here issues a certificate, and the text says so on a clean pass.
+- [x] **A claim is not a verdict.** `pdfaid:part` and `pdfaid:conformance` are what the
+  producer asserted; producers are wrong all the time. The claim is reported next to the
+  result of checking it, and a claim of `PDF/A-1u` — a level that has never existed — is
+  read as no claim at all rather than rounded to `1b`.
+- [x] Checked: identification in XMP; XMP and `/Info` agreeing on the title; encryption;
+  file identifier; PDF version against the part; fonts embedded (including the standard
+  fourteen, which PDF/A does not exempt); `/ToUnicode` for levels a and u; output intent
+  with an embedded profile, required only when the pages actually paint in device colour;
+  JavaScript and the actions that reach outside the document; embedded files by part
+  — forbidden in 1, PDF/A-only in 2, `/AFRelationship` required in 3; optional content;
+  LZW; external stream references; `/NeedAppearances`; transparency and `/Interpolate`;
+  tagging and `/Lang` for level a; annotation types, appearances, flags, and opacity.
+- [x] **Part-aware, not one rulebook.** Transparency is a violation in part 1 and a feature
+  in part 2; an attachment fails part 1 and passes part 3. Flagging a conforming feature is
+  the same failure as missing a violation, and a test pins both directions.
+- [x] `Identity-H` is deliberately *not* treated as a Unicode mapping. It maps codes to
+  glyph numbers inside one font program, which is exactly the case where `/ToUnicode` is
+  the only way back to the text.
+- [x] CLI: `pdfa`, with `--level` and a default of the level the file claims. Exits
+  non-zero when the check fails, since that is the whole question it was asked; a level
+  that cannot exist is refused before any file is read, as `E_CONFIG`.
+- [x] GUI: a PDF/A tab in the Inspect panel, with a level selector, the violations, and
+  the limits shown next to the verdict.
+
+`crates/ypdf-pdfa/tests/conformance.rs` builds a document that meets every requirement
+this crate checks and asserts it **passes** — then breaks it one requirement at a time. A
+checker that flags everything is as useless as one that flags nothing, and only a passing
+document catches that.
+
+### M14a — Signatures: reading and verifying (spec §9) — DONE
+
+The read half of the hardest item in the spec. Signing is M14b; verifying comes first,
+because a tool that can produce a signature it cannot check is a tool that cannot tell you
+when it has produced a broken one.
+
+- [x] `ypdf-sign`: every signature field found by walking the field tree (`/FT` is
+  inheritable, so a field can be a signature field because its parent said so), each
+  signature's `/ByteRange` checked against the file, and the detached CMS/PKCS#7 blob in
+  `/Contents` parsed and verified. Pure Rust throughout — `cms`, `x509-cert`, `rsa`,
+  `p256`/`p384`, `sha1`/`sha2` — so there is no OpenSSL to build and no C to link.
+- [x] **Trust is never asserted.** There is no trust store, and revocation checking needs
+  network access this tool does not have. `TRUST_LIMITS` prints with every report: an
+  intact signature means *these bytes have not changed since someone signed them with this
+  key*, and nothing about who that someone is.
+- [x] **"Cannot check" is not "invalid".** An algorithm this does not implement returns
+  `Unsupported`, with what it was. Calling it a bad signature would frighten people about a
+  file that is fine; calling it fine would wave through one that is not.
+- [x] **Four different failures, four different answers**, because they mean different
+  things to whoever reads the report: the digest not matching (`DocumentAltered`), the
+  signature over the attributes not verifying (`SignatureBroken`), the blob not being CMS at
+  all (`Unreadable`), and an algorithm not implemented (`Unsupported`).
+- [x] **The byte range is checked as hard as the maths**, because most signature fraud is
+  not cryptographic. Reported: a range that does not start at byte 0; a range reaching past
+  the end of the file; a signature covering an earlier revision, with how many bytes came
+  after; and a `/Contents` hole *larger than the signature in it*, which is the classic
+  trick — a valid signature, and room left inside the gap nobody covers.
+- [x] An intact signature over part of a file carries `SIG_INTACT_BUT_PARTIAL`. "Valid ✓"
+  on a document with a page appended after signing is the single most dangerous thing a
+  signature tool can print.
+- [x] SHA-1 signatures verify and are flagged: the maths still checks out, and a matching
+  SHA-1 digest has not proved much since 2017.
+- [x] Certificate information is read for display — subject, issuer, serial, validity, key
+  algorithm and size, self-issued or not — and labelled as what the certificate says about
+  itself.
+- [x] Timestamp tokens are detected and reported, never verified: checking one means
+  validating a second signature and trusting whoever issued it.
+- [x] Multiple signatures, certification (DocMDP) signatures, and empty signature fields are
+  all distinguished. An empty field is not a signature, and `all_intact()` on an unsigned
+  document is **false**: "nothing failed" is not "signed".
+- [x] CLI: `signatures`, with `--require-signed` for a pipeline that expects one. A failed
+  signature exits non-zero; a merely unsigned file does not, because most files are.
+- [x] GUI: a Signatures tab in the Inspect panel, coloured by verdict, showing coverage and
+  certificate details. It checks **the file on disk** and says so when the open document has
+  unsaved edits — otherwise someone edits a signed file, sees "intact", and concludes the
+  signature survived their edit.
+
+`crates/ypdf-sign/tests/signed.rs` generates a P-256 key, issues a certificate, builds a
+real detached CMS signature over a real `/ByteRange`, and assembles the PDF byte by byte
+(offsets have to be exact, so the file is laid out first and patched in place). It then
+proves all four outcomes on that file: intact; one document byte changed → altered; one
+byte of the signature changed → broken, and *not* reported as altered; content appended
+→ still intact, and reported as covering part of the file. `tests/fixtures/signed.pdf` is
+generated by the same code for the CLI tests to use.
+
+### M14b — Signatures: signing (spec §9) — next
+
+Certificate-based signing, PKCS#12 key loading, signature appearances (drawn or imported
+image), and PAdES B-B. Two things are already known about its shape: signing must be an
+**incremental update** — rewriting the file would invalidate every signature already on it
+— and **timestamping needs a network call**, which this engine does not make, so a signed
+file's time will be the signer's own clock unless a timestamp token is supplied from
+outside.
+
+### M15+ — in difficulty order
+1. **REST API** (spec §23, §24) — `apps/server`, axum + tokio, async job system reusing
    `ypdf-jobs`.
-4. **Plugin system** (spec §33).
+2. **Plugin system** (spec §33).
+
+**Not planned: PDF/A conversion.** Checking a file is honest work; *converting* one means
+embedding fonts the file does not carry, choosing an ICC profile on someone's behalf, and
+flattening what cannot be represented. Each of those changes the document. Until that can
+be done without quietly altering what a page says, `pdfa` reports and does not fix.
 
 ---
 

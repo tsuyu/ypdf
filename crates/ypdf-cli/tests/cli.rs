@@ -703,6 +703,123 @@ fn redacting_nothing_at_all_is_refused() {
 }
 
 #[test]
+fn a_pdfa_check_fails_a_file_that_is_not_pdfa_and_says_what_it_missed() {
+    let output = run(&[
+        "pdfa",
+        &fixture("two-pages.pdf").display().to_string(),
+        "--json",
+    ]);
+    let json = json_of(&output);
+    let result = &json["files"][0]["result"];
+
+    // A failed check is a finding, not an error: the file was read fine.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a failing check gates a script"
+    );
+    assert_eq!(result["passed"], false);
+    assert_eq!(result["claimed"], serde_json::Value::Null);
+    assert_eq!(result["checked"], "PDF/A-2b");
+
+    let codes: Vec<String> = result["violations"]
+        .as_array()
+        .expect("violations")
+        .iter()
+        .map(|v| v["code"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(codes.contains(&"PDFA_NO_XMP".to_string()), "{codes:?}");
+
+    // Every report carries what it did not check, in JSON as well as in text.
+    assert!(
+        !result["not_checked"].as_array().expect("limits").is_empty(),
+        "a verdict without its limits is the one thing this must not print"
+    );
+}
+
+#[test]
+fn a_pdfa_level_that_does_not_exist_is_refused_before_any_file_is_read() {
+    let output = run(&[
+        "pdfa",
+        &fixture("two-pages.pdf").display().to_string(),
+        "--level",
+        "1u",
+        "--json",
+    ]);
+    // PDF/A-1u has never existed. Exit 8 is E_CONFIG: the command was wrong,
+    // not the document.
+    assert_eq!(output.status.code(), Some(8));
+    let json = json_of(&output);
+    assert_eq!(json["error"]["code"], "E_CONFIG");
+}
+
+#[test]
+fn a_signed_document_verifies_and_still_refuses_to_call_itself_trusted() {
+    let output = run(&[
+        "signatures",
+        &fixture("signed.pdf").display().to_string(),
+        "--json",
+    ]);
+    let json = json_of(&output);
+    let result = &json["files"][0]["result"];
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(result["signed"], true);
+    assert_eq!(result["all_intact"], true);
+    assert_eq!(result["signatures"][0]["verdict"], "intact");
+    assert_eq!(result["signatures"][0]["covers_whole_file"], true);
+    assert_eq!(result["signatures"][0]["signer"], "Ada Lovelace");
+
+    // The one thing the command must never do is imply trust.
+    assert!(
+        !result["not_established"]
+            .as_array()
+            .expect("limits")
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_signed_document_with_a_byte_changed_fails_the_run() {
+    let dir = scratch("tampered-signature");
+    let path = dir.join("tampered.pdf");
+    let mut bytes = std::fs::read(fixture("signed.pdf")).expect("the fixture");
+
+    // Inside the signed range, and visible: the stated reason for signing.
+    let at = bytes
+        .windows(9)
+        .position(|window| window == b"(I agree)")
+        .expect("the reason");
+    bytes[at + 1] = b'X';
+    std::fs::write(&path, &bytes).expect("writes");
+
+    let output = run(&["signatures", &path.display().to_string(), "--json"]);
+    let json = json_of(&output);
+    let result = &json["files"][0]["result"];
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a broken signature gates a script"
+    );
+    assert_eq!(result["all_intact"], false);
+    assert_eq!(result["signatures"][0]["verdict"], "document_altered");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unsigned_file_passes_unless_signatures_were_required() {
+    let path = fixture("two-pages.pdf").display().to_string();
+
+    let relaxed = run(&["signatures", &path, "--json"]);
+    assert_eq!(relaxed.status.code(), Some(0), "unsigned is not a failure");
+
+    let strict = run(&["signatures", &path, "--require-signed", "--json"]);
+    assert_eq!(strict.status.code(), Some(1));
+}
+
+#[test]
 fn help_lists_every_command_the_spec_asks_for() {
     let output = run(&["--help"]);
     let text = stdout(&output);
@@ -719,6 +836,10 @@ fn help_lists_every_command_the_spec_asks_for() {
         "decrypt",
         "ocr",
         "redact",
+        "pdfa",
+        "signatures",
+        "annotate",
+        "forms",
     ] {
         assert!(text.contains(command), "--help omits {command}:\n{text}");
     }

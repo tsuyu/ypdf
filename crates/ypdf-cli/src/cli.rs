@@ -75,6 +75,19 @@ pub enum Command {
     /// Nothing found is executed, followed, or fetched.
     SecurityScan(SecurityScanArgs),
 
+    /// Read and check digital signatures (spec §9).
+    ///
+    /// Reports what each signature covers and whether it verifies. It never
+    /// says a signature is trusted: there is no trust store here, and
+    /// revocation checking needs network access this tool does not have.
+    Signatures(SignaturesArgs),
+
+    /// Check a document against PDF/A (spec §15).
+    ///
+    /// Exits non-zero when the check fails, so it can gate a pipeline. What is
+    /// checked, and what is not, is printed with every report.
+    Pdfa(PdfaArgs),
+
     /// Read or edit document metadata (spec §13).
     Metadata(MetadataArgs),
 
@@ -137,6 +150,8 @@ impl Command {
             Self::Info(_) => "info",
             Self::Diagnostics(_) => "diagnostics",
             Self::SecurityScan(_) => "security-scan",
+            Self::Signatures(_) => "signatures",
+            Self::Pdfa(_) => "pdfa",
             Self::Metadata(_) => "metadata",
             Self::Merge(_) => "merge",
             Self::Split(_) => "split",
@@ -176,6 +191,36 @@ pub struct SecurityScanArgs {
     /// For a gate in a pipeline: the scan itself always reports everything.
     #[arg(long, value_name = "SEVERITY")]
     pub fail_on: Option<SeverityArg>,
+}
+
+/// `signatures`.
+#[derive(Clone, Debug, Args)]
+pub struct SignaturesArgs {
+    /// Files or globs.
+    #[arg(required = true, value_name = "INPUT")]
+    pub inputs: Vec<String>,
+
+    /// Exit non-zero when a file carries no signature at all.
+    ///
+    /// Without this, only a signature that fails counts as a finding: plenty
+    /// of documents are legitimately unsigned.
+    #[arg(long)]
+    pub require_signed: bool,
+}
+
+/// `pdfa`.
+#[derive(Clone, Debug, Args)]
+pub struct PdfaArgs {
+    /// Files or globs.
+    #[arg(required = true, value_name = "INPUT")]
+    pub inputs: Vec<String>,
+
+    /// The level to check against, e.g. `2b`, `3u`, `1a`.
+    ///
+    /// Defaults to the level the file claims in its XMP. A file that claims
+    /// nothing is checked against PDF/A-2b and told that it claims nothing.
+    #[arg(long, value_name = "LEVEL")]
+    pub level: Option<String>,
 }
 
 /// Severity as a command-line word.

@@ -34,4 +34,6 @@ ypdf-redact = { version = "0.1.0", path = "../../crates/ypdf-redact" }
 ypdf-outline = { version = "0.1.0", path = "../../crates/ypdf-outline" }
 ypdf-forms = { version = "0.1.0", path = "../../crates/ypdf-forms" }
 ypdf-annot = { version = "0.1.0", path = "../../crates/ypdf-annot" }
+ypdf-pdfa = { version = "0.1.0", path = "../../crates/ypdf-pdfa" }
+ypdf-sign = { version = "0.1.0", path = "../../crates/ypdf-sign" }
 crossbeam-channel = "0.5.16"

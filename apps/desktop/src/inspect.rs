@@ -8,7 +8,9 @@
 use egui::{Color32, RichText, Ui};
 use ypdf_core::Result;
 use ypdf_doc::{Diagnostics, Metadata, MetadataEdit, Pdf, Severity};
+use ypdf_pdfa::{Level, Report as PdfaReport};
 use ypdf_security::ScanReport;
+use ypdf_sign::Report as SignatureReport;
 
 /// Which report the panel is showing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -20,6 +22,10 @@ pub enum Tab {
     Diagnostics,
     /// Security scan (spec §26).
     Security,
+    /// PDF/A check (spec §15).
+    Archival,
+    /// Digital signatures (spec §9).
+    Signatures,
 }
 
 /// Everything the panel knows, computed once per document and after each edit.
@@ -41,6 +47,15 @@ pub struct Inspection {
     pub protection: ypdf_crypt::SecurityInfo,
     /// The XMP packet, if there is one.
     pub xmp: Option<String>,
+    /// The PDF/A check.
+    pub pdfa: Option<PdfaReport>,
+    /// The level to check against, or the one the file claims when this is
+    /// `None`.
+    pub pdfa_level: Option<Level>,
+    /// The signature check, run against the file on disk.
+    pub signatures: SignatureReport,
+    /// Whether the open document has edits the signature check did not see.
+    pub edited_since_disk: bool,
     /// Why the last inspection failed, if it did.
     pub error: Option<String>,
     /// True once the reports match the document as it currently stands.
@@ -52,13 +67,19 @@ impl Inspection {
     ///
     /// Cheap enough to run whenever the document changes: one parse and one
     /// pass over the objects, with no rendering involved.
-    pub fn refresh(&mut self, pdf: &Pdf) -> Result<()> {
+    pub fn refresh(&mut self, pdf: &Pdf, source: &std::path::Path, edited: bool) -> Result<()> {
         self.metadata = pdf.metadata();
         self.draft = self.metadata.clone();
         self.diagnostics = pdf.diagnostics()?;
         self.security = ypdf_security::scan(pdf);
         self.protection = ypdf_crypt::security_info(pdf);
         self.xmp = pdf.xmp();
+        self.pdfa = Some(ypdf_pdfa::validate(pdf, self.pdfa_level));
+        // Signatures are checked against the bytes on disk, never against the
+        // replayed document: a signature covers byte offsets in one particular
+        // file, and a re-serialized copy is a different file.
+        self.signatures = ypdf_sign::verify_file(source).unwrap_or_default();
+        self.edited_since_disk = edited;
         self.error = None;
         self.loaded = true;
         Ok(())
@@ -110,6 +131,21 @@ pub fn show(ui: &mut Ui, inspection: &mut Inspection) -> bool {
         let text =
             RichText::new(format!("Security · {label}")).color(severity_colour(ui, severity));
         ui.selectable_value(&mut inspection.tab, Tab::Security, text);
+        ui.selectable_value(&mut inspection.tab, Tab::Archival, "PDF/A");
+        if inspection.signatures.is_signed() {
+            let colour = if inspection.signatures.all_intact() {
+                Color32::from_rgb(120, 190, 120)
+            } else {
+                ui.visuals().error_fg_color
+            };
+            ui.selectable_value(
+                &mut inspection.tab,
+                Tab::Signatures,
+                RichText::new("Signed").color(colour),
+            );
+        } else {
+            ui.selectable_value(&mut inspection.tab, Tab::Signatures, "Signatures");
+        }
     });
     ui.separator();
 
@@ -133,6 +169,8 @@ pub fn show(ui: &mut Ui, inspection: &mut Inspection) -> bool {
             Tab::Security => {
                 security_tab(ui, &inspection.security, &inspection.protection);
             }
+            Tab::Archival => archival_tab(ui, inspection),
+            Tab::Signatures => signatures_tab(ui, inspection),
         });
 
     apply
@@ -299,7 +337,7 @@ fn diagnostics_tab(ui: &mut Ui, report: &Diagnostics) {
                 "PDF/A",
                 &report.pdf_a_claim.as_ref().map_or_else(
                     || "Not claimed".to_string(),
-                    |c| format!("{c} (claimed, unverified)"),
+                    |c| format!("{c} claimed — see the PDF/A tab"),
                 ),
             );
         });
@@ -356,6 +394,189 @@ fn security_tab(ui: &mut Ui, report: &ScanReport, protection: &ypdf_crypt::Secur
             },
         );
     }
+}
+
+/// The PDF/A check (spec §15).
+///
+/// The verdict and its limits are shown together, always. A green line saying
+/// "compliant" without the list of what was never looked at is how a document
+/// gets sent to an archive that then rejects it.
+fn archival_tab(ui: &mut Ui, inspection: &mut Inspection) {
+    let claimed = inspection
+        .pdfa
+        .as_ref()
+        .and_then(|report| report.claimed)
+        .map_or_else(|| "Nothing claimed".to_string(), |level| level.to_string());
+    ui.label(RichText::new(format!("Claimed: {claimed}")).strong());
+
+    // Changing the level re-runs the check on the next frame: the reports are
+    // all read from one replay, so there is one path that refreshes them.
+    ui.horizontal(|ui| {
+        ui.label("Check against");
+        let current = inspection
+            .pdfa_level
+            .map_or_else(|| "As claimed".to_string(), |level| level.to_string());
+        egui::ComboBox::from_id_salt("pdfa-level")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                let mut choose = |ui: &mut Ui, level: Option<Level>, label: &str| {
+                    if ui
+                        .selectable_label(inspection.pdfa_level == level, label)
+                        .clicked()
+                        && inspection.pdfa_level != level
+                    {
+                        inspection.pdfa_level = level;
+                        inspection.loaded = false;
+                    }
+                };
+                choose(ui, None, "As claimed");
+                for text in ["1a", "1b", "2a", "2b", "2u", "3a", "3b", "3u"] {
+                    if let Ok(level) = Level::parse(text) {
+                        choose(ui, Some(level), &level.to_string());
+                    }
+                }
+            });
+    });
+
+    let Some(report) = inspection.pdfa.as_ref() else {
+        ui.weak("Not checked yet.");
+        return;
+    };
+
+    ui.add_space(6.0);
+    ui.label(format!("Checked against {}", report.checked));
+    if report.passed {
+        ui.colored_label(
+            Color32::from_rgb(120, 190, 120),
+            "Every check performed passed.",
+        );
+    } else {
+        ui.colored_label(
+            ui.visuals().error_fg_color,
+            format!("{} requirement(s) not met.", report.violations.len()),
+        );
+    }
+
+    ui.add_space(8.0);
+    for violation in &report.violations {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(violation.requirement).strong());
+            if violation.count > 1 {
+                ui.weak(format!("×{}", violation.count));
+            }
+        });
+        ui.label(&violation.message);
+        ui.weak(RichText::new(violation.code).small());
+        ui.add_space(8.0);
+    }
+
+    ui.separator();
+    egui::CollapsingHeader::new("What this does not check")
+        .default_open(report.passed)
+        .show(ui, |ui| {
+            for limit in ypdf_pdfa::LIMITS {
+                ui.weak(format!("• {limit}"));
+            }
+            ui.add_space(4.0);
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "Passing here is not a certificate of conformance. For that, run a validator                  that implements the whole standard.",
+            );
+        });
+}
+
+/// Digital signatures (spec §9).
+fn signatures_tab(ui: &mut Ui, inspection: &Inspection) {
+    let report = &inspection.signatures;
+
+    if inspection.edited_since_disk {
+        // Otherwise someone edits a signed document, sees "intact", and
+        // concludes the signature survived the edit. It did not; this is a
+        // report about the file on disk.
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            "This describes the file on disk. The open document has unsaved edits, and              saving them will not carry the signature.",
+        );
+        ui.separator();
+    }
+
+    if !report.is_signed() {
+        ui.label("The document is not signed.");
+        if !report.empty_fields.is_empty() {
+            ui.add_space(6.0);
+            ui.weak(format!(
+                "{} empty signature field(s): {}",
+                report.empty_fields.len(),
+                report.empty_fields.join(", ")
+            ));
+        }
+        return;
+    }
+
+    for signature in &report.signatures {
+        let colour = if signature.verdict.is_intact() {
+            Color32::from_rgb(120, 190, 120)
+        } else {
+            ui.visuals().error_fg_color
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(signature.signer()).strong());
+            ui.colored_label(colour, signature.verdict.label());
+        });
+
+        egui::Grid::new(format!("signature-{}", signature.field))
+            .num_columns(2)
+            .spacing([12.0, 2.0])
+            .show(ui, |ui| {
+                row(ui, "Field", &signature.field);
+                if signature.certification {
+                    row(ui, "Type", "certification");
+                }
+                if let Some(reason) = &signature.reason {
+                    row(ui, "Reason", reason);
+                }
+                if let Some(time) = &signature.claimed_time {
+                    row(ui, "Claimed time", time);
+                }
+                row(
+                    ui,
+                    "Covers",
+                    &match signature.coverage {
+                        ypdf_sign::Coverage::WholeFile => "the whole file".to_string(),
+                        ypdf_sign::Coverage::PartOfFile { signed, total } => format!(
+                            "{signed} of {total} bytes — {} added after",
+                            total.saturating_sub(signed)
+                        ),
+                    },
+                );
+                if let Some(certificate) = &signature.certificate {
+                    row(ui, "Subject", &certificate.subject);
+                    row(ui, "Issuer", &certificate.issuer);
+                    row(
+                        ui,
+                        "Valid",
+                        &format!("{} to {}", certificate.not_before, certificate.not_after),
+                    );
+                    row(ui, "Key", &certificate.key_algorithm);
+                    row(ui, "Serial", &certificate.serial);
+                }
+            });
+
+        for note in &signature.notes {
+            ui.add_space(2.0);
+            ui.colored_label(ui.visuals().warn_fg_color, &note.message);
+        }
+        ui.add_space(10.0);
+    }
+
+    ui.separator();
+    egui::CollapsingHeader::new("What this does not establish")
+        .default_open(report.all_intact())
+        .show(ui, |ui| {
+            for limit in ypdf_sign::TRUST_LIMITS {
+                ui.weak(format!("• {limit}"));
+            }
+        });
 }
 
 fn row(ui: &mut Ui, label: &str, value: &str) {

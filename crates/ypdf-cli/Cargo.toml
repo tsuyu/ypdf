@@ -27,6 +27,8 @@ ypdf-redact = { path = "../ypdf-redact" }
 ypdf-outline = { path = "../ypdf-outline" }
 ypdf-forms = { path = "../ypdf-forms" }
 ypdf-annot = { path = "../ypdf-annot" }
+ypdf-pdfa = { path = "../ypdf-pdfa" }
+ypdf-sign = { path = "../ypdf-sign" }
 clap = { version = "4.5.51", features = ["derive", "env"] }
 ctrlc = "3.5.1"
 glob = "0.3.3"
