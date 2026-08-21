@@ -1,0 +1,23 @@
+[package]
+name = "ypdf-optimize"
+description = "PDF compression: image downsampling, re-encoding, and structural cleanup."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ypdf-core = { path = "../ypdf-core" }
+ypdf-doc = { path = "../ypdf-doc" }
+lopdf = "0.44.0"
+tracing = "0.1.44"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+flate2 = "1.1.9"
+
+[dev-dependencies]
+flate2 = "1.1.9"
+lopdf = "0.44.0"

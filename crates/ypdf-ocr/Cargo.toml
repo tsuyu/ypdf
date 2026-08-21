@@ -1,0 +1,21 @@
+[package]
+name = "ypdf-ocr"
+description = "OCR through a Tesseract sidecar: recognition and invisible text layers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ypdf-core = { path = "../ypdf-core" }
+ypdf-doc = { path = "../ypdf-doc" }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+lopdf = "0.44.0"
+tracing = "0.1.44"
+
+[dev-dependencies]
+lopdf = "0.44.0"

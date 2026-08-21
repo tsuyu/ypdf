@@ -1,0 +1,24 @@
+[package]
+name = "ypdf-render"
+description = "PDF rendering and text extraction, backed by PDFium on a dedicated thread."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+crossbeam-channel = "0.5.16"
+pdfium-render = "0.9.3"
+tracing = "0.1.44"
+ypdf-core = { path = "../ypdf-core" }
+
+[dev-dependencies]
+ypdf-crypt = { path = "../ypdf-crypt" }
+ypdf-doc = { path = "../ypdf-doc" }
+ypdf-watermark = { path = "../ypdf-watermark" }
+ypdf-forms = { path = "../ypdf-forms" }
+ypdf-annot = { path = "../ypdf-annot" }

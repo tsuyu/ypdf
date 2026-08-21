@@ -1,0 +1,72 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /OpenAction 20 0 R /Names << /EmbeddedFiles << /Names [(payload.exe) 30 0 R] >> >> /AA << /WC 21 0 R >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R] /AA << /O 21 0 R >> >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 67 >>
+stream
+BT /F1 18 Tf 72 700 Td (This file is a scanner test fixture.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 690 300 710] /Border [0 0 0] /A << /Type /Action /S /URI /URI (javascript:app.alert('hello')) >> >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 660 300 680] /Border [0 0 0] /A << /Type /Action /S /URI /URI (http://192.0.2.10/invoice) >> >>
+endobj
+12 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 630 300 650] /Border [0 0 0] /A << /Type /Action /S /URI /URI (https://example.org/legitimate) >> >>
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /RichMedia /Rect [72 400 300 600] >>
+endobj
+20 0 obj
+<< /Type /Action /S /JavaScript /JS (this.exportDataObject\({cName:'payload.exe', nLaunch:2}\);) >>
+endobj
+21 0 obj
+<< /Type /Action /S /Launch /F (cmd.exe) >>
+endobj
+30 0 obj
+<< /Type /Filespec /F (payload.exe) /UF (payload.exe) /EF << /F 31 0 R >> >>
+endobj
+31 0 obj
+<< /Type /EmbeddedFile /Subtype /application#2Foctet-stream /Length 64 >>
+stream
+MZ this is not actually an executable, only the letters M and Z.
+endstream
+endobj
+xref
+0 1
+0000000000 65535 f 
+1 5
+0000000015 00000 n 
+0000000168 00000 n 
+0000000225 00000 n 
+0000000409 00000 n 
+0000000479 00000 n 
+10 4
+0000000596 00000 n 
+0000000753 00000 n 
+0000000906 00000 n 
+0000001064 00000 n 
+20 2
+0000001142 00000 n 
+0000001258 00000 n 
+30 2
+0000001318 00000 n 
+0000001411 00000 n 
+trailer
+<< /Size 32 /Root 1 0 R >>
+startxref
+1583
+%%EOF

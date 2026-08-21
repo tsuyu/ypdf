@@ -1,0 +1,38 @@
+[package]
+name = "ypdf-cli"
+description = "Scriptable command-line interface to the yPDF engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ypdf-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+ypdf-core = { path = "../ypdf-core" }
+ypdf-doc = { path = "../ypdf-doc" }
+ypdf-optimize = { path = "../ypdf-optimize" }
+ypdf-security = { path = "../ypdf-security" }
+ypdf-crypt = { path = "../ypdf-crypt" }
+ypdf-ocr = { path = "../ypdf-ocr" }
+ypdf-render = { path = "../ypdf-render" }
+ypdf-watermark = { path = "../ypdf-watermark" }
+ypdf-redact = { path = "../ypdf-redact" }
+ypdf-outline = { path = "../ypdf-outline" }
+ypdf-forms = { path = "../ypdf-forms" }
+ypdf-annot = { path = "../ypdf-annot" }
+clap = { version = "4.5.51", features = ["derive", "env"] }
+ctrlc = "3.5.1"
+glob = "0.3.3"
+rayon = "1.11.1"
+serde_json = "1.0.151"
+tracing = "0.1.44"
+
+[dev-dependencies]
+lopdf = "0.44.0"

@@ -1,0 +1,52 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R /Annots [8 0 R 9 0 R] >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Length 237 >>
+stream
+BT /F1 18 Tf 72 700 Td (The quick brown fox jumps over the lazy dog) Tj ET BT /F1 18 Tf 72 660 Td (Fox hunting is not foxy) Tj ET BT /F1 14 Tf 72 620 Td (https://example.org/docs) Tj ET BT /F1 14 Tf 72 580 Td (Continue on page two) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Length 64 >>
+stream
+BT /F1 18 Tf 72 700 Td (Second page mentions the fox once) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 614 250 634] /Border [0 0 0] /A << /Type /Action /S /URI /URI (https://example.org/docs) >> >>
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 574 250 594] /Border [0 0 0] /A << /Type /Action /S /GoTo /D [4 0 R /XYZ 0 792 0] >> >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000275 00000 n 
+0000000401 00000 n 
+0000000471 00000 n 
+0000000759 00000 n 
+0000000873 00000 n 
+0000001024 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+1168
+%%EOF

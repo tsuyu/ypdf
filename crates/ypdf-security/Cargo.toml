@@ -1,0 +1,17 @@
+[package]
+name = "ypdf-security"
+description = "PDF security scanning: JavaScript, launch actions, embedded files, suspicious structures."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ypdf-core = { path = "../ypdf-core" }
+ypdf-doc = { path = "../ypdf-doc" }
+lopdf = "0.44.0"
+tracing = "0.1.44"

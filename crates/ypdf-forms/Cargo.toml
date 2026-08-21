@@ -1,0 +1,22 @@
+[package]
+name = "ypdf-forms"
+description = "AcroForm fields: reading, filling, clearing, flattening, and data interchange."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ypdf-core = { path = "../ypdf-core" }
+ypdf-doc = { path = "../ypdf-doc" }
+lopdf = "0.44.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracing = "0.1.44"
+
+[dev-dependencies]
+lopdf = "0.44.0"

@@ -1,0 +1,4 @@
+# `unwrap`/`expect` are denied in engine code but fine in tests, where a panic
+# is the failure report.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

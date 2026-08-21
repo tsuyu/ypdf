@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Vendored native libraries (pdfium, tesseract) — fetched by CI, never committed.
+/vendor
+
+# Local developer overrides.
+/config.toml
+.env
