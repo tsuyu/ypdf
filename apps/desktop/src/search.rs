@@ -150,9 +150,14 @@ mod tests {
                     right: i as f32 * 10.0 + 10.0,
                     top: 112.0,
                 },
+                size: 12.0,
+                font: 0,
             })
             .collect();
-        PageText { chars }
+        PageText {
+            chars,
+            fonts: Vec::new(),
+        }
     }
 
     fn search_for(query: &str) -> Search {

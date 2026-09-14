@@ -8,13 +8,16 @@ use ypdf_render::{DocumentId, DocumentInfo, PageAnalysis, PageIndex, QuarterTurn
 use crate::annotate::AnnotatePanel;
 use crate::compress::CompressDialog;
 use crate::edit::EditSession;
+use crate::export::ExportPanel;
 use crate::forms::FormsPanel;
 use crate::inspect::Inspection;
+use crate::merge::MergeDialog;
 use crate::ocr::OcrDialog;
 use crate::outline::OutlinePanel;
 use crate::protect::{PasswordPrompt, ProtectDialog};
 use crate::redact::RedactState;
 use crate::search::Search;
+use crate::split::SplitDialog;
 use crate::textures::PageCache;
 use crate::watermark::WatermarkDialog;
 
@@ -119,6 +122,12 @@ pub struct OpenDocument {
     pub analyses: HashMap<PageIndex, PageAnalysis>,
     /// Pages already asked for, so scrolling does not re-ask every frame.
     pub analysis_requested: std::collections::HashSet<PageIndex>,
+    /// Pages whose text could not be read.
+    ///
+    /// Kept so that something waiting on the whole document knows the
+    /// difference between a page that has not arrived yet and one that never
+    /// will, instead of waiting for ever.
+    pub analysis_failed: std::collections::HashSet<PageIndex>,
     /// Search state.
     pub search: Search,
     /// Current text selection, if any.
@@ -156,6 +165,12 @@ pub struct OpenDocument {
     pub outline: OutlinePanel,
     /// The form panel (spec §16).
     pub forms: FormsPanel,
+    /// The split dialog (spec §3.2).
+    pub split: SplitDialog,
+    /// The merge dialog (spec §3.1).
+    pub merge: MergeDialog,
+    /// The export panel (spec §5).
+    pub export: ExportPanel,
     /// Annotation tools and the list of what is on the document (spec §10).
     pub annotate: AnnotatePanel,
     /// A copy carrying the annotations, waiting to be saved.
@@ -189,6 +204,7 @@ impl OpenDocument {
             scroll_to_current: false,
             analyses: HashMap::new(),
             analysis_requested: std::collections::HashSet::new(),
+            analysis_failed: std::collections::HashSet::new(),
             search: Search::default(),
             selection: None,
             selecting: false,
@@ -206,6 +222,9 @@ impl OpenDocument {
             redact: RedactState::new(),
             outline: OutlinePanel::default(),
             forms: FormsPanel::default(),
+            split: SplitDialog::default(),
+            merge: MergeDialog::default(),
+            export: ExportPanel::default(),
             annotate: AnnotatePanel::default(),
             annotation_bytes: None,
             pending_annotation: None,
@@ -356,6 +375,7 @@ impl OpenDocument {
         self.cache.clear();
         self.analyses.clear();
         self.analysis_requested.clear();
+        self.analysis_failed.clear();
         self.search.clear_results();
         self.selection = None;
         self.selected_pages.clear();
@@ -367,7 +387,30 @@ impl OpenDocument {
         self.outline.invalidate();
         self.forms.invalidate();
         self.annotate.invalidate();
+        // The conversion described the document as it was a moment ago.
+        self.export.invalidate();
         self.invalidate();
+    }
+
+    /// Correct the page count the moment an edit is applied.
+    ///
+    /// `info` is replaced only when the reopened document comes back from the
+    /// render thread, which is several frames away. Until then the viewer would
+    /// lay out — and ask the renderer for — pages the edit has already removed,
+    /// and every one of those requests comes back as a failure about a page
+    /// that is gone rather than broken.
+    pub fn set_page_count(&mut self, pages: PageIndex) {
+        let Some(info) = self.info.as_mut() else {
+            return;
+        };
+        info.page_count = pages;
+        // Sizes past the new end describe pages that no longer exist. The ones
+        // that remain are placeholders either way until `Opened` brings the
+        // real ones.
+        if let Ok(len) = usize::try_from(pages) {
+            info.page_sizes_pt.truncate(len);
+        }
+        self.current_page = self.current_page.min((pages - 1).max(0));
     }
 
     /// Move the view to a page.

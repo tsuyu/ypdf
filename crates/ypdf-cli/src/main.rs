@@ -104,6 +104,23 @@ fn run(cli: &Cli, out: &Out) -> Result<i32> {
             outcome.emit(out, cli.command.name());
             Ok(outcome.exit_code())
         }
+        Command::Markdown(args) => {
+            // Reading a text layer means asking PDFium, which is one thread,
+            // so this runs its own loop like the other PDFium commands.
+            let files = batch::expand(&args.inputs)?;
+            let results =
+                commands::convert::markdown(&files, args, password, overwrite, &cancel, out)?;
+            let outcome = batch::BatchOutcome::from_results(results);
+            outcome.emit(out, cli.command.name());
+            Ok(outcome.exit_code())
+        }
+        Command::Docx(args) => {
+            let files = batch::expand(&args.inputs)?;
+            let results = commands::convert::docx(&files, args, password, overwrite, &cancel, out)?;
+            let outcome = batch::BatchOutcome::from_results(results);
+            outcome.emit(out, cli.command.name());
+            Ok(outcome.exit_code())
+        }
         _ => run_batch(cli, out, workers, overwrite, &cancel),
     }
 }
@@ -204,6 +221,8 @@ fn run_batch(
         | Command::Split(_)
         | Command::Extract(_)
         | Command::Ocr(_)
+        | Command::Markdown(_)
+        | Command::Docx(_)
         | Command::Redact(_) => {
             return Err(Error::Config {
                 detail: "this command is not a batch command".into(),
@@ -231,6 +250,8 @@ fn inputs_of(command: &Command) -> &[String] {
         Command::Decrypt(args) => &args.inputs,
         Command::Merge(args) => &args.inputs,
         Command::Ocr(args) => &args.inputs,
+        Command::Markdown(args) => &args.inputs,
+        Command::Docx(args) => &args.inputs,
         Command::Redact(args) => &args.inputs,
         Command::Annotate(args) => &args.inputs,
         Command::Forms(args) => &args.inputs,

@@ -45,8 +45,8 @@ mod types;
 
 pub use queue::RenderQueue;
 pub use text::{
-    CharBox, LinkTarget, PageAnalysis, PageLink, PageText, RectPt, SearchOptions, TextMatch,
-    find_matches,
+    CharBox, FontFace, LinkTarget, PageAnalysis, PageLink, PageText, RectPt, SearchOptions,
+    TextMatch, find_matches,
 };
 pub use thread::{RenderHandle, prefetch_window, priority_for_distance};
 pub use types::{

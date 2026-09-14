@@ -5675,6 +5675,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "ypdf-annot",
+ "ypdf-convert",
  "ypdf-core",
  "ypdf-crypt",
  "ypdf-doc",
@@ -5688,6 +5689,15 @@ dependencies = [
  "ypdf-security",
  "ypdf-sign",
  "ypdf-watermark",
+]
+
+[[package]]
+name = "ypdf-convert"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "tracing",
+ "ypdf-render",
 ]
 
 [[package]]
@@ -5728,6 +5738,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "ypdf-annot",
+ "ypdf-convert",
  "ypdf-core",
  "ypdf-crypt",
  "ypdf-doc",

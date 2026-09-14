@@ -246,6 +246,58 @@ fn extracts_the_text_layer_with_character_boxes() {
 }
 
 #[test]
+fn the_text_layer_carries_font_size_and_face() {
+    let (_gate, render) = handle();
+    let doc = render.open(fixture("linked.pdf"), None);
+    until(&render, |event| match event {
+        RenderEvent::Opened { doc: d, .. } if d == doc => Some(()),
+        RenderEvent::Failed { error, .. } => panic!("{}", error.report().to_human()),
+        _ => None,
+    });
+
+    render.analyze(doc, 0);
+    let analysis = until(&render, |event| match event {
+        RenderEvent::Analyzed { analysis, .. } => Some(analysis),
+        RenderEvent::Failed { error, .. } => panic!("{}", error.report().to_human()),
+        _ => None,
+    });
+
+    let text = &analysis.text;
+    assert!(
+        !text.fonts.is_empty(),
+        "a page with text is drawn in at least one face"
+    );
+
+    // The fixture sets its first line at 18pt and its last at 14pt, so the
+    // sizes have to survive extraction for a heading to be tellable from body
+    // text later on.
+    let sizes: Vec<f32> = text.chars.iter().map(|c| c.size).collect();
+    assert!(
+        sizes.iter().all(|s| *s > 0.0),
+        "every character needs a drawn size"
+    );
+    let largest = sizes.iter().copied().fold(f32::MIN, f32::max);
+    let smallest = sizes.iter().copied().fold(f32::MAX, f32::min);
+    assert!(
+        largest > smallest,
+        "this fixture mixes 18pt and 14pt: got a single size {largest}"
+    );
+
+    // Every character must point at a face that exists, or the table is worse
+    // than useless.
+    for i in 0..text.chars.len() {
+        assert!(
+            text.face_of(i).is_some(),
+            "character {i} points outside the font table"
+        );
+    }
+    assert!(
+        !text.fonts[0].name.is_empty(),
+        "a face without a name tells us nothing"
+    );
+}
+
+#[test]
 fn search_finds_matches_and_locates_them_on_the_page() {
     let (_gate, render) = handle();
     let doc = render.open(fixture("linked.pdf"), None);

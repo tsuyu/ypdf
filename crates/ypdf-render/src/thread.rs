@@ -11,13 +11,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
-use pdfium_render::prelude::{PdfDocument, PdfPageRenderRotation, PdfRenderConfig, Pdfium, Pixels};
+use pdfium_render::prelude::{
+    PdfDocument, PdfFontWeight, PdfPageRenderRotation, PdfRenderConfig, Pdfium, Pixels,
+};
 use ypdf_core::{Error, ParseFailure, Result};
 
 use crate::errors::from_pdfium;
 use crate::library;
 use crate::queue::RenderQueue;
-use crate::text::{CharBox, LinkTarget, PageAnalysis, PageLink, PageText, RectPt};
+use crate::text::{CharBox, FontFace, LinkTarget, PageAnalysis, PageLink, PageText, RectPt};
 use crate::types::{
     DocumentId, DocumentInfo, PageIndex, Priority, QuarterTurns, RenderEvent, RenderRequest,
     RenderedPage,
@@ -577,6 +579,7 @@ fn analyze(document: &PdfDocument<'static>, index: PageIndex) -> Result<PageAnal
     let page = pages.get(index).map_err(|e| from_pdfium(&e, None))?;
 
     let mut chars = Vec::new();
+    let mut fonts: Vec<FontFace> = Vec::new();
     if let Ok(text) = page.text() {
         for c in text.chars().iter() {
             // A character with no box cannot be highlighted or hit-tested;
@@ -585,9 +588,18 @@ fn analyze(document: &PdfDocument<'static>, index: PageIndex) -> Result<PageAnal
             let (Some(ch), Ok(bounds)) = (c.unicode_char(), c.loose_bounds()) else {
                 continue;
             };
+            let face = FontFace {
+                name: c.font_name(),
+                weight: font_weight(c.font_weight()),
+                italic: c.font_is_italic(),
+                serif: c.font_is_serif(),
+                fixed_pitch: c.font_is_fixed_pitch(),
+            };
             chars.push(CharBox {
                 ch,
                 rect: rect_pt(&bounds),
+                size: c.scaled_font_size().value,
+                font: intern_font(&mut fonts, face),
             });
         }
     }
@@ -603,8 +615,41 @@ fn analyze(document: &PdfDocument<'static>, index: PageIndex) -> Result<PageAnal
 
     Ok(PageAnalysis {
         page: index,
-        text: PageText { chars },
+        text: PageText { chars, fonts },
         links,
+    })
+}
+
+/// Add `face` to the page's table if it is new, and return its index.
+///
+/// A linear scan rather than a map: a page draws in a handful of faces, and
+/// first-seen order is worth more than lookup speed at that size.
+fn intern_font(fonts: &mut Vec<FontFace>, face: FontFace) -> u16 {
+    if let Some(found) = fonts.iter().position(|f| *f == face) {
+        return u16::try_from(found).unwrap_or(0);
+    }
+    let next = u16::try_from(fonts.len()).unwrap_or(0);
+    fonts.push(face);
+    next
+}
+
+/// PDFium's font weight as a plain number.
+fn font_weight(weight: Option<PdfFontWeight>) -> Option<u32> {
+    use PdfFontWeight::{
+        Custom, Weight100, Weight200, Weight300, Weight400Normal, Weight500, Weight600,
+        Weight700Bold, Weight800, Weight900,
+    };
+    Some(match weight? {
+        Weight100 => 100,
+        Weight200 => 200,
+        Weight300 => 300,
+        Weight400Normal => 400,
+        Weight500 => 500,
+        Weight600 => 600,
+        Weight700Bold => 700,
+        Weight800 => 800,
+        Weight900 => 900,
+        Custom(other) => other,
     })
 }
 

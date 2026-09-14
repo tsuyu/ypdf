@@ -22,6 +22,7 @@ ypdf-security = { path = "../ypdf-security" }
 ypdf-crypt = { path = "../ypdf-crypt" }
 ypdf-ocr = { path = "../ypdf-ocr" }
 ypdf-render = { path = "../ypdf-render" }
+ypdf-convert = { path = "../ypdf-convert" }
 ypdf-watermark = { path = "../ypdf-watermark" }
 ypdf-redact = { path = "../ypdf-redact" }
 ypdf-outline = { path = "../ypdf-outline" }

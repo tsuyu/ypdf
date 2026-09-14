@@ -1,0 +1,16 @@
+[package]
+name = "ypdf-convert"
+description = "Reconstructing document structure from a PDF text layer, and writing it out as Markdown."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ypdf-render = { path = "../ypdf-render" }
+crc32fast = "1.5.0"
+tracing = "0.1.44"

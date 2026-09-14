@@ -844,3 +844,123 @@ fn help_lists_every_command_the_spec_asks_for() {
         assert!(text.contains(command), "--help omits {command}:\n{text}");
     }
 }
+
+#[test]
+fn markdown_rebuilds_headings_paragraphs_and_lists() {
+    // The fixture is set at three sizes with a bold subheading and two
+    // bulleted lines, so every inference this command makes is exercised.
+    let output = run(&["markdown", &fixture("structured.pdf").display().to_string()]);
+    let text = stdout(&output);
+
+    assert!(
+        text.contains("# Quarterly Report"),
+        "the largest line should be the top heading:\n{text}"
+    );
+    assert!(
+        text.contains("## Findings"),
+        "the middle size should be the second level:\n{text}"
+    );
+    assert!(
+        text.contains("sets out what changed, why it changed"),
+        "two lines of one paragraph should be joined:\n{text}"
+    );
+    assert!(
+        text.contains("- Revenue rose by four per cent.\n- Costs were flat."),
+        "bulleted lines should be a tight list:\n{text}"
+    );
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn markdown_writes_a_file_when_told_where() {
+    let dir = scratch("markdown-out");
+    let target = dir.join("report.md");
+    let output = run(&[
+        "markdown",
+        &fixture("structured.pdf").display().to_string(),
+        "-o",
+        &target.display().to_string(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+    let written = std::fs::read_to_string(&target).expect("the markdown file");
+    assert!(written.starts_with("# Quarterly Report"), "{written}");
+}
+
+#[test]
+fn markdown_reports_a_page_with_no_text_rather_than_going_quiet() {
+    // Spec §5: conversion quality is reported, not promised. A scan has no
+    // text layer, and silence would read as "this page was empty".
+    let output = run(&[
+        "markdown",
+        &fixture("no-fonts.pdf").display().to_string(),
+        "--json",
+    ]);
+    let json = json_of(&output);
+
+    let warnings = json["files"][0]["result"]["warnings"]
+        .as_array()
+        .expect("warnings are a list");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or_default().contains("no text layer")),
+        "expected a no-text-layer warning, got {warnings:?}"
+    );
+}
+
+#[test]
+fn docx_writes_a_word_package_with_the_structure_it_found() {
+    let dir = scratch("docx-out");
+    let target = dir.join("report.docx");
+    let output = run(&[
+        "docx",
+        &fixture("structured.pdf").display().to_string(),
+        "-o",
+        &target.display().to_string(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+
+    let bytes = std::fs::read(&target).expect("the docx file");
+    assert_eq!(&bytes[..2], b"PK", "a docx is a ZIP");
+
+    // The entries are stored rather than deflated, so the parts are findable
+    // in the bytes as they are. That is what makes this checkable without a
+    // ZIP reader in the test.
+    let haystack = String::from_utf8_lossy(&bytes);
+    for needle in [
+        "word/document.xml",
+        "word/styles.xml",
+        "word/numbering.xml",
+        r#"<w:pStyle w:val="Heading1"/>"#,
+        r#"<w:pStyle w:val="Heading2"/>"#,
+        "Quarterly Report",
+        "Revenue rose by four per cent.",
+    ] {
+        assert!(
+            haystack.contains(needle),
+            "{needle} is missing from the docx"
+        );
+    }
+}
+
+#[test]
+fn docx_refuses_to_clobber_without_overwrite() {
+    let dir = scratch("docx-existing");
+    let target = dir.join("taken.docx");
+    std::fs::write(&target, b"not a docx").expect("the file in the way");
+
+    let output = run(&[
+        "docx",
+        &fixture("structured.pdf").display().to_string(),
+        "-o",
+        &target.display().to_string(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(11), "E_OUTPUT_EXISTS");
+    assert_eq!(
+        std::fs::read(&target).expect("still there"),
+        b"not a docx",
+        "the file in the way must be untouched"
+    );
+}

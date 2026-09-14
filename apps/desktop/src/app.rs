@@ -171,11 +171,29 @@ impl YpdfApp {
                         continue;
                     }
 
+                    // A failure about a page the document no longer has is the
+                    // tail of a request issued before an edit shrank it. The
+                    // page is gone, not broken, and reporting it would call a
+                    // successful edit a failure.
+                    if let Some(index) = page
+                        && self
+                            .documents
+                            .iter()
+                            .any(|d| d.id == doc && index >= d.page_count())
+                    {
+                        continue;
+                    }
+
                     if let Some(target) = self.documents.iter_mut().find(|d| d.id == doc) {
                         // A failure to open kills the tab's content; a failure
                         // on one page only belongs in the status bar.
-                        if page.is_none() {
-                            target.error = Some(report.clone());
+                        match page {
+                            None => target.error = Some(report.clone()),
+                            // Settled, badly. Anything waiting for the whole
+                            // document needs to know this page is never coming.
+                            Some(index) => {
+                                target.analysis_failed.insert(index);
+                            }
                         }
                     }
                     self.status_error = Some(error.message());
@@ -426,6 +444,8 @@ impl YpdfApp {
 
         let mut op = None;
         let mut save = None;
+        let mut open_split = false;
+        let mut open_merge = false;
 
         ui.menu_button("Pages", |ui| {
             let label = if selected == 0 {
@@ -461,7 +481,37 @@ impl YpdfApp {
                 op = Some(EditAction::Insert);
                 ui.close();
             }
+            ui.separator();
+            if ui
+                .button("Split…")
+                .on_hover_text("Write several files, leaving this one as it is")
+                .clicked()
+            {
+                open_split = true;
+                ui.close();
+            }
+            if ui
+                .button("Merge…")
+                .on_hover_text("Join this document with others into a new file")
+                .clicked()
+            {
+                open_merge = true;
+                ui.close();
+            }
         });
+
+        if open_split && let Some(doc) = self.documents.get_mut(self.active) {
+            doc.split.open = true;
+        }
+
+        if open_merge && let Some(doc) = self.documents.get_mut(self.active) {
+            // Seeded here rather than in the dialog: only the application knows
+            // what the open document is called and how long it is.
+            let title = doc.title();
+            let pages = u32::try_from(doc.page_count()).unwrap_or(0);
+            doc.merge.seed(title, pages);
+            doc.merge.open = true;
+        }
 
         if ui
             .add_enabled(can_undo, egui::Button::new("Undo"))
@@ -536,12 +586,13 @@ impl YpdfApp {
             return;
         };
 
-        let bytes = match doc
+        let edited = doc
             .edits
             .apply(op.clone())
-            .and_then(|mut pdf| pdf.to_bytes())
-        {
-            Ok(bytes) => bytes,
+            .and_then(|mut pdf| Ok((pdf.page_count(), pdf.to_bytes()?)));
+
+        let (pages, bytes) = match edited {
+            Ok(edited) => edited,
             Err(e) => {
                 tracing::warn!("{}", e.report().to_human());
                 self.status_error = Some(edit::describe_failure(&op, &e));
@@ -551,6 +602,7 @@ impl YpdfApp {
 
         tracing::info!(op = %op.describe(), "applied edit");
         doc.invalidate_content();
+        doc.set_page_count(page_index(pages));
         self.render.reopen(doc.id, bytes);
         self.status_error = None;
     }
@@ -563,14 +615,18 @@ impl YpdfApp {
 
         match doc.edits.undo() {
             Ok(None) => {}
-            Ok(Some(mut pdf)) => match pdf.to_bytes() {
-                Ok(bytes) => {
-                    doc.invalidate_content();
-                    self.render.reopen(doc.id, bytes);
-                    self.status_error = None;
+            Ok(Some(mut pdf)) => {
+                let pages = pdf.page_count();
+                match pdf.to_bytes() {
+                    Ok(bytes) => {
+                        doc.invalidate_content();
+                        doc.set_page_count(page_index(pages));
+                        self.render.reopen(doc.id, bytes);
+                        self.status_error = None;
+                    }
+                    Err(e) => self.status_error = Some(e.message()),
                 }
-                Err(e) => self.status_error = Some(e.message()),
-            },
+            }
             Err(e) => {
                 tracing::warn!("{}", e.report().to_human());
                 self.status_error = Some(e.message());
@@ -696,6 +752,343 @@ impl YpdfApp {
             crate::compress::Action::Run => self.run_compression(),
             crate::compress::Action::SaveAs => self.save_compressed(),
             crate::compress::Action::Discard => self.discard_compression(),
+        }
+    }
+
+    /// Convert the document to Markdown or Word (spec §5).
+    fn handle_export(&mut self, ctx: &egui::Context) {
+        self.collect_export();
+
+        let Some(action) = self.documents.get_mut(self.active).and_then(|doc| {
+            let total = usize::try_from(doc.page_count()).unwrap_or(0);
+            let settled = doc.analyses.len() + doc.analysis_failed.len();
+            doc.export.show(ctx, settled.min(total), total)
+        }) else {
+            return;
+        };
+
+        match action {
+            crate::export::Action::Convert => self.start_export(),
+            crate::export::Action::SaveMarkdown => self.save_export(Format::Markdown),
+            crate::export::Action::SaveDocx => self.save_export(Format::Docx),
+            crate::export::Action::Copy => self.copy_markdown(ctx),
+        }
+    }
+
+    /// Ask for the text of every page, then wait.
+    ///
+    /// Like a search, this is one of the few places that wants the whole
+    /// document rather than the pages on screen. Extraction sits behind
+    /// rendering on the render thread, so it costs reading nothing.
+    fn start_export(&mut self) {
+        let Some(doc) = self.documents.get_mut(self.active) else {
+            return;
+        };
+
+        doc.export.result = None;
+        doc.export.preview.clear();
+        doc.export.error = None;
+        doc.export.waiting = true;
+
+        for page in 0..doc.page_count() {
+            if !doc.analyses.contains_key(&page) && doc.analysis_requested.insert(page) {
+                self.render.analyze(doc.id, page);
+            }
+        }
+    }
+
+    /// Rebuild the structure once every page has settled, one way or the other.
+    fn collect_export(&mut self) {
+        let Some(doc) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        if !doc.export.waiting {
+            return;
+        }
+
+        let total = doc.page_count();
+        if total <= 0 {
+            doc.export.waiting = false;
+            return;
+        }
+
+        let outstanding = (0..total)
+            .any(|page| !doc.analyses.contains_key(&page) && !doc.analysis_failed.contains(&page));
+        if outstanding {
+            return;
+        }
+
+        // A page whose text could not be read contributes an empty page, which
+        // the converter reports as having no text layer. Dropping it instead
+        // would quietly renumber every warning after it.
+        let pages: Vec<ypdf_render::PageText> = (0..total)
+            .map(|page| {
+                doc.analyses
+                    .get(&page)
+                    .map(|analysis| analysis.text.clone())
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        let document = ypdf_convert::read(&pages);
+        doc.export.preview = ypdf_convert::markdown::render(&document.blocks);
+        doc.export.result = Some(document);
+        doc.export.waiting = false;
+    }
+
+    /// Write the conversion where the user says, in the format they asked for.
+    fn save_export(&mut self, format: Format) {
+        let Some(doc) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        let Some(document) = doc.export.result.as_ref() else {
+            return;
+        };
+
+        // Rendered at the point of saving rather than held in two forms: the
+        // reconstruction is the answer, and both files are written from it.
+        let bytes = match format {
+            Format::Markdown => doc.export.preview.clone().into_bytes(),
+            Format::Docx => ypdf_convert::docx::write(&document.blocks),
+        };
+
+        let stem = doc.edits.source().file_stem().map_or_else(
+            || "document".to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
+        let Some(target) = rfd::FileDialog::new()
+            .add_filter(format.label(), &[format.extension()])
+            .set_file_name(format!("{stem}.{}", format.extension()))
+            .set_title(format.title())
+            .save_file()
+        else {
+            return;
+        };
+
+        match std::fs::write(&target, &bytes) {
+            Ok(()) => {
+                tracing::info!(path = %target.display(), format = format.label(), "saved export");
+                doc.export.error = None;
+                self.status_error = None;
+            }
+            Err(e) => {
+                let error = ypdf_core::Error::io(&target, e);
+                tracing::warn!("{}", error.report().to_human());
+                doc.export.error = Some(error.message());
+            }
+        }
+    }
+
+    /// Put the Markdown on the clipboard.
+    fn copy_markdown(&mut self, ctx: &egui::Context) {
+        let Some(text) = self
+            .documents
+            .get(self.active)
+            .map(|doc| doc.export.preview.clone())
+            .filter(|text| !text.is_empty())
+        else {
+            return;
+        };
+        tracing::debug!(chars = text.chars().count(), "copying markdown");
+        ctx.copy_text(text);
+    }
+
+    /// Cut the document into several files (spec §3.2).
+    fn handle_split(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.documents.get_mut(self.active).and_then(|doc| {
+            let pages = u32::try_from(doc.page_count()).unwrap_or(0);
+            doc.split.show(ctx, pages)
+        }) else {
+            return;
+        };
+
+        match action {
+            crate::split::Action::Run => self.run_split(),
+        }
+    }
+
+    /// Write every piece into a folder the user picks.
+    ///
+    /// The document is split as edited rather than as last saved, so the pieces
+    /// match what is on screen. Nothing is overwritten: piece names come from
+    /// page numbers, so a second run with different settings would quietly
+    /// replace the first run's work, and a file already there stops the run and
+    /// says which one it was.
+    fn run_split(&mut self) {
+        let Some(doc) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        doc.split.error = None;
+
+        let mode = match doc.split.resolve() {
+            Ok(mode) => mode,
+            Err(e) => {
+                doc.split.error = Some(e.message());
+                return;
+            }
+        };
+
+        let pieces = match doc
+            .edits
+            .replay()
+            .and_then(|pdf| ypdf_doc::split(&pdf, &mode))
+        {
+            Ok(pieces) => pieces,
+            Err(e) => {
+                tracing::warn!("{}", e.report().to_human());
+                doc.split.error = Some(e.message());
+                return;
+            }
+        };
+
+        if pieces.is_empty() {
+            doc.split.error = Some("Those settings cut nothing out.".to_string());
+            return;
+        }
+
+        // Asked for only once the settings are known to work: a folder dialog
+        // for a run that was never going to happen is pure noise.
+        let Some(folder) = rfd::FileDialog::new()
+            .set_title("Folder for the split files")
+            .pick_folder()
+        else {
+            return;
+        };
+
+        let stem = doc.edits.source().file_stem().map_or_else(
+            || "document".to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
+
+        let (written, failure) = crate::split::write_pieces(&folder, &stem, pieces);
+        tracing::info!(
+            files = written.len(),
+            folder = %folder.display(),
+            "split document"
+        );
+        doc.split.error = failure;
+        doc.split.written = written;
+    }
+
+    /// Add files to, or run, a merge (spec §3.1).
+    fn handle_merge(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.documents.get_mut(self.active).and_then(|doc| {
+            // The document can be edited while the dialog is up, so its length
+            // is re-read every frame rather than trusted from when it was added.
+            let pages = u32::try_from(doc.page_count()).unwrap_or(0);
+            doc.merge.refresh_open(pages);
+            doc.merge.show(ctx)
+        }) else {
+            return;
+        };
+
+        match action {
+            crate::merge::Action::AddFiles => self.add_merge_files(),
+            crate::merge::Action::Run => self.run_merge(),
+        }
+    }
+
+    /// Put more documents on the end of the merge list.
+    ///
+    /// Each is opened as it is added so the list can show its length, and so a
+    /// file that cannot be read is caught now rather than halfway through a
+    /// merge the user has already committed to.
+    fn add_merge_files(&mut self) {
+        let Some(paths) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_title("Add PDFs to merge")
+            .pick_files()
+        else {
+            return;
+        };
+
+        let Some(doc) = self.documents.get_mut(self.active) else {
+            return;
+        };
+
+        for path in paths {
+            match ypdf_doc::Pdf::open(&path) {
+                Ok(pdf) => {
+                    let pages = pdf.page_count();
+                    doc.merge.push_file(path, pages);
+                    doc.merge.error = None;
+                }
+                Err(e) => {
+                    tracing::warn!("{}", e.report().to_human());
+                    doc.merge.error = Some(format!("{}: {}", path.display(), e.message()));
+                }
+            }
+        }
+    }
+
+    /// Join the listed documents and write the result where the user says.
+    ///
+    /// The open document contributes its edits, not the file on disk, which is
+    /// the same promise the split dialog makes.
+    fn run_merge(&mut self) {
+        let Some(doc) = self.documents.get_mut(self.active) else {
+            return;
+        };
+        doc.merge.error = None;
+
+        // Cloned so the loop can report a failure into the dialog it is
+        // reading from.
+        let entries = doc.merge.entries.clone();
+        let mut documents = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            let opened = match &entry.source {
+                crate::merge::Source::Open => doc.edits.replay(),
+                crate::merge::Source::File(path) => ypdf_doc::Pdf::open(path),
+            };
+            match opened {
+                Ok(pdf) => documents.push(pdf),
+                Err(e) => {
+                    tracing::warn!("{}", e.report().to_human());
+                    doc.merge.error = Some(format!("{}: {}", entry.label, e.message()));
+                    return;
+                }
+            }
+        }
+
+        let bytes = match ypdf_doc::Pdf::merge(&documents).and_then(|mut pdf| pdf.to_bytes()) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!("{}", e.report().to_human());
+                doc.merge.error = Some(e.message());
+                return;
+            }
+        };
+
+        let stem = doc.edits.source().file_stem().map_or_else(
+            || "document".to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
+        // A save dialog rather than a bare folder: merging produces one file,
+        // and the native dialog is already the place where overwriting is
+        // asked about properly.
+        let Some(target) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}-merged.pdf"))
+            .set_title("Save merged PDF")
+            .save_file()
+        else {
+            return;
+        };
+
+        match std::fs::write(&target, &bytes) {
+            Ok(()) => {
+                tracing::info!(
+                    documents = entries.len(),
+                    path = %target.display(),
+                    "merged documents"
+                );
+                doc.merge.written = Some(target);
+            }
+            Err(e) => {
+                let error = ypdf_core::Error::io(&target, e);
+                tracing::warn!("{}", error.report().to_human());
+                doc.merge.error = Some(error.message());
+            }
         }
     }
 
@@ -1847,6 +2240,8 @@ impl YpdfApp {
                         .on_hover_text("The document outline (spec §17)");
                     ui.toggle_value(&mut doc.forms.open, "Form")
                         .on_hover_text("Fill in the form fields (spec §16)");
+                    ui.toggle_value(&mut doc.export.open, "Export")
+                        .on_hover_text("Convert the text to Markdown or Word (spec §5)");
                     ui.toggle_value(&mut doc.annotate.open, "Annotate")
                         .on_hover_text("Highlight, comment, and draw (spec §10)");
                 }
@@ -2113,6 +2508,9 @@ impl eframe::App for YpdfApp {
         self.refresh_inspection();
 
         self.handle_compression(&ctx);
+        self.handle_split(&ctx);
+        self.handle_merge(&ctx);
+        self.handle_export(&ctx);
         self.handle_password_prompt(&ctx);
         self.handle_ocr(&ctx);
         self.handle_watermark(&ctx);
@@ -2139,5 +2537,43 @@ impl std::fmt::Debug for YpdfApp {
             .field("documents", &self.documents.len())
             .field("active", &self.active)
             .finish()
+    }
+}
+
+/// Page counts cross from `ypdf-doc`'s `u32` to the renderer's signed index.
+///
+/// A document with more pages than an `i32` can hold does not exist, but
+/// saturating is still better than a panic in the frame loop.
+fn page_index(count: u32) -> ypdf_render::PageIndex {
+    ypdf_render::PageIndex::try_from(count).unwrap_or(ypdf_render::PageIndex::MAX)
+}
+
+/// Which file an export is being written as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Format {
+    Markdown,
+    Docx,
+}
+
+impl Format {
+    const fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Docx => "docx",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Markdown => "Markdown",
+            Self::Docx => "Word document",
+        }
+    }
+
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Markdown => "Save Markdown",
+            Self::Docx => "Save Word document",
+        }
     }
 }

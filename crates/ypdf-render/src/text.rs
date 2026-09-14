@@ -55,13 +55,59 @@ impl RectPt {
     }
 }
 
-/// One character and where it sits on the page.
+/// One typeface as a page uses it.
+///
+/// Held once per page and referred to by index. A page of three thousand
+/// glyphs draws them in a handful of faces, and a `String` per character would
+/// cost more than the text itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FontFace {
+    /// Name as the file gives it, e.g. `"Helvetica-Bold"`. Embedded subsets
+    /// usually carry a six-letter tag, as in `"ABCDEF+Minion-Regular"`.
+    pub name: String,
+    /// Weight from 100 to 900, when the file says. Absent is common.
+    pub weight: Option<u32>,
+    /// The face is italic or oblique.
+    pub italic: bool,
+    /// The face has serifs.
+    pub serif: bool,
+    /// Every glyph has the same width, as in a monospaced face.
+    pub fixed_pitch: bool,
+}
+
+impl FontFace {
+    /// Whether this face reads as bold.
+    ///
+    /// By declared weight when there is one — 600 rather than 700, so that
+    /// semibold faces, which are used for headings as often as bold ones, are
+    /// not missed. Otherwise by name, which is all a file without a weight
+    /// gives us to go on.
+    #[must_use]
+    pub fn is_bold(&self) -> bool {
+        match self.weight {
+            Some(weight) => weight >= 600,
+            None => {
+                let name = self.name.to_ascii_lowercase();
+                name.contains("bold") || name.contains("black") || name.contains("heavy")
+            }
+        }
+    }
+}
+
+/// One character, where it sits, and how it is drawn.
 #[derive(Clone, Copy, Debug)]
 pub struct CharBox {
     /// The character itself.
     pub ch: char,
     /// Its box on the page.
     pub rect: RectPt,
+    /// Font size in points as drawn, with the text matrix applied.
+    ///
+    /// This is the number that distinguishes a heading from body text, so it
+    /// is the drawn size rather than the size named in the font dictionary.
+    pub size: f32,
+    /// Which of [`PageText::fonts`] drew it.
+    pub font: u16,
 }
 
 /// Everything extracted from one page's text layer.
@@ -69,6 +115,8 @@ pub struct CharBox {
 pub struct PageText {
     /// Characters in reading order, as PDFium reports them.
     pub chars: Vec<CharBox>,
+    /// The faces those characters are drawn in, in first-seen order.
+    pub fonts: Vec<FontFace>,
 }
 
 impl PageText {
@@ -80,6 +128,16 @@ impl PageText {
     #[must_use]
     pub fn text(&self) -> String {
         self.chars.iter().map(|c| c.ch).collect()
+    }
+
+    /// The face character `index` is drawn in.
+    ///
+    /// `None` when the text came from somewhere that carries no font table,
+    /// such as a test fixture.
+    #[must_use]
+    pub fn face_of(&self, index: usize) -> Option<&FontFace> {
+        let ch = self.chars.get(index)?;
+        self.fonts.get(usize::from(ch.font))
     }
 
     /// The text of a character range.
@@ -279,9 +337,81 @@ mod tests {
                     right: i as f32 * 10.0 + 10.0,
                     top: 112.0,
                 },
+                size: 12.0,
+                font: 0,
             })
             .collect();
-        PageText { chars }
+        PageText {
+            chars,
+            fonts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_face_is_bold_by_weight_when_the_file_declares_one() {
+        let semibold = FontFace {
+            weight: Some(600),
+            ..FontFace::default()
+        };
+        assert!(
+            semibold.is_bold(),
+            "semibold sets headings as often as bold"
+        );
+
+        let book = FontFace {
+            weight: Some(400),
+            name: "Something-Bold".to_string(),
+            ..FontFace::default()
+        };
+        assert!(
+            !book.is_bold(),
+            "a declared weight outranks a name that disagrees with it"
+        );
+    }
+
+    #[test]
+    fn a_face_without_a_weight_falls_back_to_its_name() {
+        let by_name = FontFace {
+            name: "ABCDEF+Minion-Bold".to_string(),
+            ..FontFace::default()
+        };
+        assert!(by_name.is_bold(), "a subset tag must not hide the name");
+
+        let plain = FontFace {
+            name: "Minion-Regular".to_string(),
+            ..FontFace::default()
+        };
+        assert!(!plain.is_bold());
+    }
+
+    #[test]
+    fn a_page_without_a_font_table_reports_no_face() {
+        let text = page("hi");
+        assert!(
+            text.face_of(0).is_none(),
+            "an absent table is not a face at index zero"
+        );
+        assert!(text.face_of(99).is_none(), "and neither is a missing char");
+    }
+
+    #[test]
+    fn faces_are_looked_up_per_character() {
+        let mut text = page("hi");
+        text.fonts = vec![
+            FontFace {
+                name: "Body".to_string(),
+                ..FontFace::default()
+            },
+            FontFace {
+                name: "Head".to_string(),
+                weight: Some(700),
+                ..FontFace::default()
+            },
+        ];
+        text.chars[1].font = 1;
+
+        assert_eq!(text.face_of(0).expect("face").name, "Body");
+        assert!(text.face_of(1).expect("face").is_bold());
     }
 
     #[test]

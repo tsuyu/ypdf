@@ -140,6 +140,20 @@ pub enum Command {
     /// The scan itself is not changed: the recognized words go into an
     /// invisible layer over the page.
     Ocr(OcrArgs),
+
+    /// Write a document out as Markdown (spec §5).
+    ///
+    /// A PDF records where glyphs sit, not what they mean, so the headings,
+    /// paragraphs, and lists here are inferred from size, weight, and spacing.
+    /// What could not be inferred is reported rather than passed off as clean.
+    Markdown(MarkdownArgs),
+
+    /// Write a document out as a Word file (spec §5).
+    ///
+    /// The same reconstruction as `markdown`, written as `.docx` instead:
+    /// headings become Word heading styles and lists become real Word lists.
+    /// What could not be inferred is reported rather than passed off as clean.
+    Docx(DocxArgs),
 }
 
 impl Command {
@@ -161,6 +175,8 @@ impl Command {
             Self::Encrypt(_) => "encrypt",
             Self::Decrypt(_) => "decrypt",
             Self::Ocr(_) => "ocr",
+            Self::Markdown(_) => "markdown",
+            Self::Docx(_) => "docx",
             Self::Watermark(_) => "watermark",
             Self::Redact(_) => "redact",
             Self::Annotate(_) => "annotate",
@@ -941,4 +957,42 @@ mod tests {
         };
         assert!(!args.is_edit());
     }
+}
+
+/// `markdown` — a document as Markdown (spec §5).
+#[derive(Clone, Debug, Args)]
+pub struct MarkdownArgs {
+    /// Files or globs.
+    #[arg(required = true, value_name = "INPUT")]
+    pub inputs: Vec<String>,
+
+    /// Where to write: a file for one input, a directory for several.
+    ///
+    /// Without this the Markdown goes to stdout, which is what makes the
+    /// command useful in a pipe.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+
+    /// Which pages, e.g. `1-10`. Defaults to all of them.
+    #[arg(long, value_name = "RANGES")]
+    pub pages: Option<String>,
+}
+
+/// `docx` — a document as a Word file (spec §5).
+#[derive(Clone, Debug, Args)]
+pub struct DocxArgs {
+    /// Files or globs.
+    #[arg(required = true, value_name = "INPUT")]
+    pub inputs: Vec<String>,
+
+    /// Where to write: a file for one input, a directory for several.
+    ///
+    /// Required, unlike `markdown`: a `.docx` is a ZIP, and there is nothing
+    /// useful to do with one on stdout.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: PathBuf,
+
+    /// Which pages, e.g. `1-10`. Defaults to all of them.
+    #[arg(long, value_name = "RANGES")]
+    pub pages: Option<String>,
 }

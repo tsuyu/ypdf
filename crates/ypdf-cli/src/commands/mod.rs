@@ -1,6 +1,7 @@
 //! One module per family of commands.
 
 pub mod annotate;
+pub mod convert;
 pub mod forms;
 pub mod inspect;
 pub mod navigate;
