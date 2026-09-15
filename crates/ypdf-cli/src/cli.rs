@@ -100,6 +100,13 @@ pub enum Command {
     /// Write out only the pages named (spec §3.3).
     Extract(ExtractArgs),
 
+    /// Rearrange the pages of a document: rotate, delete, duplicate, reorder,
+    /// move, reverse (spec §3).
+    ///
+    /// One operation per run. Page numbers always mean the document as it was
+    /// read, so there is never a question of which numbering a flag is in.
+    Pages(PagesArgs),
+
     /// Make files smaller (spec §4).
     Compress(CompressArgs),
 
@@ -170,6 +177,7 @@ impl Command {
             Self::Merge(_) => "merge",
             Self::Split(_) => "split",
             Self::Extract(_) => "extract",
+            Self::Pages(_) => "pages",
             Self::Compress(_) => "compress",
             Self::Images(_) => "images",
             Self::Encrypt(_) => "encrypt",
@@ -363,6 +371,55 @@ pub struct ExtractArgs {
     /// Where to write.
     #[arg(short, long, value_name = "FILE")]
     pub output: PathBuf,
+}
+
+/// `pages`.
+#[derive(Clone, Debug, Args)]
+pub struct PagesArgs {
+    /// Files or globs.
+    #[arg(required = true, value_name = "INPUT")]
+    pub inputs: Vec<String>,
+
+    /// Where to write: a file for one input, a directory for several.
+    #[arg(short, long, value_name = "PATH")]
+    pub output: PathBuf,
+
+    /// Which pages to act on, e.g. `1-10,20,last`. Defaults to all of them.
+    ///
+    /// Used by `--rotate`, `--delete`, and `--duplicate`; the other operations
+    /// are about the document as a whole and refuse it.
+    #[arg(long, value_name = "RANGES")]
+    pub pages: Option<String>,
+
+    /// Turn the pages clockwise, in degrees: a multiple of 90, negative for
+    /// anticlockwise. Adds to whatever rotation a page already carries.
+    #[arg(long, value_name = "DEGREES", allow_negative_numbers = true)]
+    pub rotate: Option<i32>,
+
+    /// Remove the pages.
+    #[arg(long)]
+    pub delete: bool,
+
+    /// Repeat the pages, each copy directly after its original.
+    #[arg(long)]
+    pub duplicate: bool,
+
+    /// How many copies `--duplicate` leaves behind. Defaults to one.
+    #[arg(long, value_name = "N", default_value_t = 1)]
+    pub copies: u32,
+
+    /// Put the document in a new order, e.g. `3,1,2`. Every page exactly once.
+    #[arg(long, value_name = "LIST")]
+    pub order: Option<String>,
+
+    /// Move one page, as `FROM:TO`. Both 1-based, as a drag in the thumbnail
+    /// sidebar would be.
+    #[arg(long = "move", value_name = "FROM:TO")]
+    pub move_page: Option<String>,
+
+    /// Reverse the whole document.
+    #[arg(long)]
+    pub reverse: bool,
 }
 
 /// `compress`.

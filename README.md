@@ -139,6 +139,9 @@ ypdf-cli info document.pdf
 ypdf-cli merge chapter-*.pdf -o book.pdf
 ypdf-cli split document.pdf --pages 1-20,21-40 -o out/
 ypdf-cli extract document.pdf --pages 1-10,last -o excerpt.pdf
+ypdf-cli pages scan.pdf --rotate 90 --pages 2-5 -o upright.pdf
+ypdf-cli pages report.pdf --delete --pages 3 -o shorter.pdf
+ypdf-cli pages deck.pdf --order 12,1-11 -o reordered.pdf
 ypdf-cli compress ./invoices/*.pdf -o ./small/ --preset "Email PDF"
 ypdf-cli images scan.pdf -o images/
 ypdf-cli metadata report.pdf --set-title "Q1 Results" --overwrite
@@ -156,6 +159,10 @@ ypdf-cli links ./inbox/*.pdf --json
 ypdf-cli security-scan ./inbox/*.pdf --fail-on high
 ypdf-cli diagnostics broken.pdf --json
 ```
+
+`pages` does one rearrangement per run — `--rotate`, `--delete`, `--duplicate`,
+`--order`, `--move`, or `--reverse`. Two at once is refused rather than guessed at:
+page numbers would mean one thing before the first operation and another after it.
 
 Globs are expanded by the tool, so `*.pdf` works in PowerShell and `cmd` as well as in a
 POSIX shell, and matches are sorted so a merge is predictable.

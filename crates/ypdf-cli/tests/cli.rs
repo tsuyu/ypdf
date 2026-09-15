@@ -964,3 +964,97 @@ fn docx_refuses_to_clobber_without_overwrite() {
         "the file in the way must be untouched"
     );
 }
+
+#[test]
+fn pages_rotates_only_the_pages_named() {
+    let dir = scratch("pages-rotate");
+    let target = dir.join("turned.pdf");
+    let output = run(&[
+        "pages",
+        &fixture("two-pages.pdf").display().to_string(),
+        "--rotate",
+        "90",
+        "--pages",
+        "1",
+        "-o",
+        &target.display().to_string(),
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+
+    // Written small and uncompressed by the writer, so the page dictionaries
+    // are readable in the bytes: one page turned, the other left alone.
+    let bytes = std::fs::read(&target).expect("the rotated file");
+    let text = String::from_utf8_lossy(&bytes);
+    assert_eq!(
+        text.matches("/Rotate 90").count(),
+        1,
+        "exactly one page should carry a rotation"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pages_reports_what_it_did_in_json() {
+    let dir = scratch("pages-json");
+    let target = dir.join("shorter.pdf");
+    let output = run(&[
+        "pages",
+        &fixture("many-pages.pdf").display().to_string(),
+        "--delete",
+        "--pages",
+        "2-4",
+        "-o",
+        &target.display().to_string(),
+        "--json",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
+
+    let json = json_of(&output);
+    let result = &json["files"][0]["result"];
+    assert_eq!(result["action"], "delete");
+    assert_eq!(result["pages_before"], 12);
+    assert_eq!(result["pages_after"], 9);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pages_without_an_operation_says_what_is_on_offer() {
+    let dir = scratch("pages-no-op");
+    let target = dir.join("nothing.pdf");
+    let output = run(&[
+        "pages",
+        &fixture("two-pages.pdf").display().to_string(),
+        "-o",
+        &target.display().to_string(),
+    ]);
+
+    assert_ne!(output.status.code(), Some(0), "nothing was asked for");
+    let said = format!(
+        "{}{}",
+        stdout(&output),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(said.contains("--rotate"), "{said}");
+    assert!(!target.exists(), "nothing should have been written");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pages_refuses_two_operations_at_once() {
+    let dir = scratch("pages-two-ops");
+    let target = dir.join("both.pdf");
+    let output = run(&[
+        "pages",
+        &fixture("two-pages.pdf").display().to_string(),
+        "--reverse",
+        "--delete",
+        "--pages",
+        "1",
+        "-o",
+        &target.display().to_string(),
+    ]);
+
+    assert_ne!(output.status.code(), Some(0), "one operation at a time");
+    assert!(!target.exists(), "nothing should have been written");
+    let _ = std::fs::remove_dir_all(&dir);
+}

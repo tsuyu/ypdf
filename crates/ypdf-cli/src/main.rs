@@ -196,6 +196,14 @@ fn run_batch(
                 commands::watermark::run(path, args, &watermark, password, many, overwrite, cancel)
             })
         }
+        Command::Pages(args) => {
+            // Resolved once: a command that names no operation, or two of them,
+            // is a mistake in the command rather than a property of the files.
+            let _ = commands::pages::action_of(args)?;
+            batch::run(&files, workers, cancel, out, |path, _cancel| {
+                commands::pages::edit(path, args, password, many, overwrite)
+            })
+        }
         Command::Images(args) => batch::run(&files, workers, cancel, out, |path, cancel| {
             commands::optimize::images(path, args, password, many, overwrite, cancel, out)
         }),
@@ -244,6 +252,7 @@ fn inputs_of(command: &Command) -> &[String] {
         Command::Pdfa(args) => &args.inputs,
         Command::Metadata(args) => &args.inputs,
         Command::Compress(args) => &args.inputs,
+        Command::Pages(args) => &args.inputs,
         Command::Images(args) => &args.inputs,
         Command::Watermark(args) => &args.inputs,
         Command::Encrypt(args) => &args.inputs,
