@@ -1,0 +1,144 @@
+# Build and publish a release when a version tag is pushed.
+#
+# Windows only, deliberately: vendor/pdfium carries the non-V8 PDFium build for
+# x86_64-pc-windows-msvc and nothing else, and a release for a platform whose
+# PDFium was never vetted would be a worse thing to ship than no release.
+#
+# The release is created as a DRAFT. A tag push is easy to get wrong; a draft
+# gives a look at the notes and the archive before anyone can download it.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Buildable without tagging, to check the packaging works before committing
+  # to a version number.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package, e.g. 0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins 1.92, and rustup on the runner honours it on
+      # the first cargo invocation. Named here so the log says which toolchain
+      # built the artifacts.
+      - name: Show toolchain
+        run: |
+          rustup show
+          cargo --version
+
+      # vendor/ is gitignored, so a fresh checkout has no PDFium at all: the
+      # tests that render, and the packaging step, both need it fetched first.
+      # Pinned inside the script at chromium/8009 (PDFium 153.0.8009), non-V8.
+      - name: Fetch PDFium
+        shell: pwsh
+        run: ./scripts/fetch-pdfium.ps1
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # The gates the project already holds itself to. A tag that cannot pass
+      # them should not become a download.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF -like "refs/tags/v*") {
+            $env:GITHUB_REF -replace "^refs/tags/v", ""
+          } else {
+            "${{ github.event.inputs.version }}"
+          }
+
+          # A tag that disagrees with Cargo.toml means one of the two is wrong,
+          # and guessing which would ship a mislabelled archive.
+          $manifest = Get-Content Cargo.toml -Raw
+          if ($manifest -notmatch '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"') {
+            throw "could not read the workspace version out of Cargo.toml"
+          }
+          $declared = $Matches[1]
+          if ($version -ne $declared) {
+            throw "tag says $version, Cargo.toml says $declared"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package.ps1 -Version ${{ steps.version.outputs.version }} -Target $env:TARGET -SkipBuild:$false
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ypdf-${{ steps.version.outputs.version }}-${{ env.TARGET }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+      # gh is preinstalled on GitHub runners, so the release is cut with the
+      # first-party tool and GITHUB_TOKEN rather than a third-party action with
+      # a token of its own.
+      - name: Draft the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $name = "ypdf-$version-$env:TARGET"
+          $sha = Get-Content "dist/$name.zip.sha256" -Raw
+
+          # Built as an array rather than a here-string: a here-string
+          # terminator has to sit at column 0, and nothing in a YAML block
+          # scalar can.
+          $notes = @(
+            "## yPDF $version",
+            "",
+            "Windows x86_64. Unzip anywhere, then run ``ypdf.exe`` for the desktop",
+            "application or ``ypdf-cli.exe`` for the command line.",
+            "",
+            "PDFium ships inside the archive at ``vendor/pdfium/$env:TARGET/bin/``.",
+            "Keep that folder beside the executables: without it nothing opens.",
+            "",
+            "SHA-256:",
+            "",
+            '```',
+            $sha.Trim(),
+            '```'
+          ) -join "`n"
+
+          gh release create "v$version" `
+            "dist/$name.zip" `
+            "dist/$name.zip.sha256" `
+            --draft `
+            --title "yPDF $version" `
+            --notes $notes `
+            --generate-notes

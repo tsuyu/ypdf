@@ -1,0 +1,23 @@
+# SHA-256 of every vendored PDFium archive, for one pinned release.
+#
+# Tag: chromium/8009 (PDFium 153.0.8009), published 2026-08-17.
+#
+# These are the digests GitHub records for the release assets themselves, read
+# from the releases API, not hashes of a copy someone happened to download. A
+# fetch that does not match one of these is refused: the binary ends up inside
+# every yPDF build, so "it downloaded, probably fine" is not good enough.
+#
+# To move to a newer PDFium, change TAG in both fetch scripts and replace this
+# whole file:
+#
+#   curl -sS https://api.github.com/repos/bblanchon/pdfium-binaries/releases/tags/chromium%2F<build> \
+#     | jq -r '.assets[] | select(.name|endswith(".tgz")) | "\(.digest|sub("sha256:";""))  \(.name)"'
+#
+# Non-V8 builds only. yPDF detects JavaScript in a document (spec §20, §26) and
+# must never be able to execute it.
+
+c78a8cd51b48abafcb266d868e401afefda1d189aa01ebbe743dc1d144e06031  pdfium-win-x64.tgz
+be513e8021a5bf8eb2116e00d78c3bacb82c5a02b3785156ae14fe5e33084385  pdfium-linux-x64.tgz
+ed70360807d9e6bc4ae2b0469b576177ee9e680e73ad8216230bf8c9a6719b9c  pdfium-linux-arm64.tgz
+e0afb6905e97438a9159aaa5b6c4fe188d97a7e3be05dc4782422c3ca7e1ce1a  pdfium-mac-x64.tgz
+b1f2f17c7432a9942514dda5094ee9822c743bdfd07e7187725efbd34fde941f  pdfium-mac-arm64.tgz

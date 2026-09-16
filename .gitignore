@@ -2,6 +2,9 @@
 **/*.rs.bk
 *.pdb
 
+# Release archives built by scripts/package.ps1.
+/dist
+
 # Vendored native libraries (pdfium, tesseract) — fetched by CI, never committed.
 /vendor
 

@@ -56,7 +56,8 @@ as their milestones start.
 ## Build
 
 Fetch the PDFium binary first — it is a native library, vendored rather than
-committed:
+committed. The download is checked against `scripts/pdfium.sha256` and refused
+if it does not match:
 
 ```bash
 pwsh scripts/fetch-pdfium.ps1     # Windows
@@ -500,4 +501,12 @@ batch processing and automation nearly free.
 
 ## License
 
-MIT OR Apache-2.0.
+MIT OR Apache-2.0, at your option. See [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE).
+
+PDFium is vendored rather than committed, and carries its own licences: the
+prebuilt package is MIT, PDFium itself is BSD-3-Clause, and the libraries
+compiled into it have their own terms again. `scripts/fetch-pdfium.{ps1,sh}`
+unpack all of those into `vendor/pdfium/<triple>/`, and `scripts/package.ps1`
+ships them inside every release archive, since the archive redistributes the
+binary they cover.

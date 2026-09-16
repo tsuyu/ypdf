@@ -1,0 +1,20 @@
+# Line endings are per-file, not per-checkout.
+#
+# core.autocrlf rewrites working-tree files on checkout, which turns a shell
+# script into one Linux cannot run ("bad interpreter: /usr/bin/env bash^M").
+# The scripts here are part of the build and the release, so their endings are
+# stated rather than guessed at.
+
+* text=auto
+
+*.sh text eol=lf
+*.ps1 text eol=crlf
+
+# Fixtures are byte-exact: several tests compare whole files, and a PDF whose
+# newlines were "helpfully" converted is a different document with a different
+# xref table.
+*.pdf binary
+*.docx binary
+*.dll binary
+*.so binary
+*.dylib binary

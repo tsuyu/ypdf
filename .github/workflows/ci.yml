@@ -1,0 +1,101 @@
+# Checks on every push and pull request.
+#
+# Two platforms for two different reasons. Windows is where yPDF is developed
+# and the only platform with a vendored PDFium that ships, so it runs the full
+# gate: formatting, lints, tests. Linux runs the build and the tests to catch
+# the things that only break off Windows — path handling, line endings, and the
+# native dependencies eframe needs.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins 1.92; rustup honours it on the first cargo
+      # call. Printed so the log says what built this.
+      - name: Show toolchain
+        run: |
+          rustup show
+          cargo --version
+
+      # vendor/ is gitignored, so a checkout has no PDFium. Anything that
+      # renders or reads a text layer needs it, which is most of the tests.
+      - name: Fetch PDFium
+        shell: pwsh
+        run: ./scripts/fetch-pdfium.ps1
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-cargo-
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # The workspace warns on unwrap/expect/todo rather than denying them, so
+      # CI is where that warning has to bite.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # eframe needs GTK for the file dialogs and xkbcommon for keyboard input;
+      # neither is on the runner by default.
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libgtk-3-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+
+      # Invoked through bash rather than as ./scripts/...: the file is tracked
+      # without an executable bit, and CI should not depend on one being set.
+      - name: Fetch PDFium
+        run: bash scripts/fetch-pdfium.sh
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-cargo-
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      # No display on the runner. The tests do not open a window — PDFium
+      # rasterizes offscreen — so they run as they are.
+      - name: Test
+        run: cargo test --workspace --locked

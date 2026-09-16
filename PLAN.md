@@ -126,7 +126,8 @@ renderer (glow is off, so `on_exit` takes no GL context).
 ### M1 — Viewer (weeks 2-4) — spec §2.1 — DONE
 
 - [x] PDFium vendored per-triple under `vendor/pdfium/<triple>/bin/`, fetched by
-  `scripts/fetch-pdfium.{ps1,sh}`, pinned at `chromium/8009` (PDFium 153.0.8009).
+  `scripts/fetch-pdfium.{ps1,sh}`, pinned at `chromium/8009` (PDFium 153.0.8009)
+  and verified against `scripts/pdfium.sha256` before anything is unpacked.
   Loading searches `YPDF_PDFIUM_PATH`, the vendor directory beside the executable and
   up its ancestors, the executable's own directory, then the system library, and
   reports every path it tried when it fails (Risk R1).
