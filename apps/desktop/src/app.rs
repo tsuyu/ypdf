@@ -58,6 +58,12 @@ pub struct YpdfApp {
     status_error: Option<String>,
     /// Set for one frame when the find field should take keyboard focus.
     focus_search: bool,
+    /// The pictures-into-PDF dialog (spec §6).
+    ///
+    /// Not per-document: it makes a new file and never touches an open one, and
+    /// it has to be reachable with no document open at all — which is exactly
+    /// when someone has a folder of scans and no PDF yet.
+    images: crate::images::ImagesDialog,
 }
 
 impl YpdfApp {
@@ -86,6 +92,7 @@ impl YpdfApp {
             recent,
             status_error: None,
             focus_search: false,
+            images: crate::images::ImagesDialog::default(),
         };
         for path in open {
             app.open(path);
@@ -985,6 +992,120 @@ impl YpdfApp {
         match action {
             crate::merge::Action::AddFiles => self.add_merge_files(),
             crate::merge::Action::Run => self.run_merge(),
+        }
+    }
+
+    /// Run the pictures-into-PDF dialog (spec §6).
+    fn handle_images(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.images.show(ctx) else {
+            return;
+        };
+
+        match action {
+            crate::images::Action::AddFiles => self.add_pictures(),
+            crate::images::Action::Run => self.run_images_to_pdf(),
+        }
+    }
+
+    /// Put more pictures on the end of the list.
+    ///
+    /// Nothing is decoded here. A file that turns out not to be a picture is
+    /// reported when the document is built, where it can be skipped and named
+    /// rather than holding up the whole list.
+    fn add_pictures(&mut self) {
+        let Some(paths) = rfd::FileDialog::new()
+            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "tif", "tiff"])
+            .set_title("Add pictures")
+            .pick_files()
+        else {
+            return;
+        };
+
+        for path in paths {
+            self.images.push(path);
+        }
+    }
+
+    /// Build a document from the listed pictures and write it.
+    ///
+    /// The open document is not touched: like merging, this produces a new
+    /// file and leaves the tab alone.
+    fn run_images_to_pdf(&mut self) {
+        self.images.error = None;
+
+        let entries = self.images.entries.clone();
+        let options = self.images.options();
+
+        // Read before asking where to save: a file that has vanished since it
+        // was picked should be reported before the user commits to a path.
+        let mut loaded = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            match std::fs::read(&entry.path) {
+                Ok(bytes) => loaded.push((entry.label.clone(), bytes)),
+                Err(e) => {
+                    let error = ypdf_core::Error::io(&entry.path, e);
+                    tracing::warn!("{}", error.report().to_human());
+                    self.images.error = Some(format!("{}: {}", entry.label, error.message()));
+                    return;
+                }
+            }
+        }
+
+        let sources: Vec<ypdf_image::Source<'_>> = loaded
+            .iter()
+            .map(|(name, bytes)| ypdf_image::Source { name, bytes })
+            .collect();
+
+        let mut built = match ypdf_image::to_pdf(&sources, &options) {
+            Ok(built) => built,
+            Err(e) => {
+                tracing::warn!("{}", e.report().to_human());
+                self.images.error = Some(e.reason().unwrap_or_else(|| e.message()));
+                return;
+            }
+        };
+
+        let bytes = match built.pdf.to_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!("{}", e.report().to_human());
+                self.images.error = Some(e.message());
+                return;
+            }
+        };
+
+        let Some(target) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name("pictures.pdf")
+            .set_title("Save the new PDF")
+            .save_file()
+        else {
+            return;
+        };
+
+        match std::fs::write(&target, &bytes) {
+            Ok(()) => {
+                tracing::info!(
+                    pictures = sources.len(),
+                    pages = built.pages,
+                    path = %target.display(),
+                    "built a PDF from pictures"
+                );
+                let skipped = built
+                    .warnings
+                    .iter()
+                    .map(ypdf_image::Warning::message)
+                    .collect();
+                self.images.written = Some((target.clone(), skipped));
+                // Opened straight away: the first thing anyone does with a PDF
+                // they just made is look at it.
+                self.open(target);
+            }
+            Err(e) => {
+                let error = ypdf_core::Error::io(&target, e);
+                tracing::warn!("{}", error.report().to_human());
+                self.images.error = Some(error.message());
+            }
         }
     }
 
@@ -2214,6 +2335,13 @@ impl YpdfApp {
                 {
                     self.open(path);
                 }
+                if ui
+                    .button("Pictures…")
+                    .on_hover_text("Make a PDF from JPEG, PNG, WebP or TIFF files")
+                    .clicked()
+                {
+                    self.images.open = true;
+                }
                 if let Some(doc) = self.documents.get_mut(self.active) {
                     let (label, severity) = doc.inspection.security_badge();
                     let text = if doc.inspection.loaded {
@@ -2416,12 +2544,24 @@ impl YpdfApp {
     fn body(&mut self, ui: &mut egui::Ui) {
         if self.documents.is_empty() {
             let mut open = None;
+            let mut open_images = false;
             egui::CentralPanel::default().show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.25);
                     ui.heading("Drop a PDF here");
                     ui.add_space(4.0);
                     ui.weak("Local-first. Nothing leaves this machine.");
+
+                    // Someone with a folder of scans and no PDF yet has no
+                    // document to hang a menu off, which is the whole point.
+                    ui.add_space(16.0);
+                    if ui
+                        .button("Make a PDF from pictures…")
+                        .on_hover_text("JPEG, PNG, WebP or TIFF, one per page")
+                        .clicked()
+                    {
+                        open_images = true;
+                    }
 
                     let entries = self.recent.entries();
                     if !entries.is_empty() {
@@ -2444,6 +2584,9 @@ impl YpdfApp {
                     }
                 });
             });
+            if open_images {
+                self.images.open = true;
+            }
             if let Some(path) = open {
                 self.open(path);
             }
@@ -2510,6 +2653,7 @@ impl eframe::App for YpdfApp {
         self.handle_compression(&ctx);
         self.handle_split(&ctx);
         self.handle_merge(&ctx);
+        self.handle_images(&ctx);
         self.handle_export(&ctx);
         self.handle_password_prompt(&ctx);
         self.handle_ocr(&ctx);

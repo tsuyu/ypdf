@@ -25,6 +25,7 @@ tracing = "0.1.44"
 ypdf-core = { path = "../../crates/ypdf-core" }
 ypdf-doc = { version = "0.1.0", path = "../../crates/ypdf-doc" }
 ypdf-convert = { version = "0.1.0", path = "../../crates/ypdf-convert" }
+ypdf-image = { version = "0.1.0", path = "../../crates/ypdf-image" }
 ypdf-optimize = { version = "0.1.0", path = "../../crates/ypdf-optimize" }
 ypdf-render = { version = "0.1.0", path = "../../crates/ypdf-render" }
 ypdf-security = { version = "0.1.0", path = "../../crates/ypdf-security" }

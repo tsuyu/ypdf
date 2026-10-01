@@ -48,7 +48,7 @@ pub fn apply(pdf: &mut Pdf, pages: &[u32], watermark: &Watermark) -> Result<Repo
         Content::Image { .. } => None,
     };
     let image = match &watermark.content {
-        Content::Image { bytes } => Some(crate::image_xobject::place(document, bytes)?),
+        Content::Image { bytes } => Some(ypdf_doc::image_xobject::place(document, bytes)?),
         Content::Text { .. } => None,
     };
 

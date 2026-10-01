@@ -109,15 +109,26 @@ fn candidate_dirs() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(exe_dir) = exe.parent()
     {
-        dirs.push(vendor_dir(exe_dir));
-        // A dev build lives in target/debug; the vendor directory sits at the
-        // workspace root, two levels up.
-        for ancestor in exe_dir.ancestors().skip(1).take(3) {
-            dirs.push(vendor_dir(ancestor));
-        }
-        dirs.push(exe_dir.to_path_buf());
+        dirs.extend(dirs_above(exe_dir));
     }
 
+    dirs
+}
+
+/// Vendor directories to try for an executable living in `exe_dir`, nearest
+/// first, then the executable's own directory.
+///
+/// Every ancestor is walked rather than a fixed few. An installed build finds
+/// the library beside itself on the first try; a development build finds it at
+/// the workspace root, and how far up that is depends on how cargo was
+/// invoked — `--target` adds a directory level, and a counted walk that fits
+/// `target/debug` silently misses `target/<triple>/debug`.
+fn dirs_above(exe_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![vendor_dir(exe_dir)];
+    for ancestor in exe_dir.ancestors().skip(1) {
+        dirs.push(vendor_dir(ancestor));
+    }
+    dirs.push(exe_dir.to_path_buf());
     dirs
 }
 
@@ -139,6 +150,27 @@ mod tests {
             dirs.iter().any(|d| d.to_string_lossy().contains("vendor")),
             "expected a vendor path among {dirs:?}"
         );
+    }
+
+    #[test]
+    fn a_cross_target_build_still_reaches_the_workspace_root() {
+        // target/<triple>/debug/deps is one level deeper than target/debug,
+        // which is what `cargo test --target ...` produces.
+        let exe_dir = Path::new("/work/ypdf/target")
+            .join(TARGET_TRIPLE)
+            .join("debug")
+            .join("deps");
+        let dirs = dirs_above(&exe_dir);
+        assert!(
+            dirs.contains(&vendor_dir(Path::new("/work/ypdf"))),
+            "the workspace root is not among {dirs:?}"
+        );
+    }
+
+    #[test]
+    fn an_installed_build_looks_beside_itself_first() {
+        let exe_dir = Path::new("/opt/ypdf");
+        assert_eq!(dirs_above(exe_dir).first(), Some(&vendor_dir(exe_dir)));
     }
 
     #[test]

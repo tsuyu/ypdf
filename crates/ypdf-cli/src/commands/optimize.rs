@@ -7,7 +7,7 @@ use ypdf_core::preset::{Compression, Preset};
 use ypdf_core::{CancelToken, Error, OperationId, ProgressReporter, Result};
 
 use crate::batch::FileReport;
-use crate::cli::{CompressArgs, ImagesArgs};
+use crate::cli::{CompressArgs, ImagesArgs, ImagesToPdfArgs};
 use crate::output::Out;
 use crate::paths;
 
@@ -213,6 +213,102 @@ fn reporter(out: &Out) -> ProgressReporter {
         }
     });
     ProgressReporter::new(OperationId::new(), tx)
+}
+
+/// `images-to-pdf` — pictures in, one document out (spec §6).
+///
+/// Not a batch command: many inputs make one output by definition, so it
+/// reports once rather than per file. The order of the inputs is the order of
+/// the pages, which is why `batch::expand` sorting its matches matters here.
+pub fn images_to_pdf(
+    files: &[std::path::PathBuf],
+    args: &ImagesToPdfArgs,
+    overwrite: bool,
+    cancel: &CancelToken,
+    out: &Out,
+) -> Result<FileReport> {
+    paths::guard(&args.output, overwrite)?;
+
+    let options = options_from(args)?;
+
+    // Read everything first: `to_pdf` works on bytes so that the GUI can hand
+    // it files the user picked without this crate knowing about disks.
+    let mut loaded = Vec::with_capacity(files.len());
+    for path in files {
+        cancel.check()?;
+        match std::fs::read(path) {
+            Ok(bytes) => loaded.push((paths::stem_of(path), bytes)),
+            Err(e) => out.note(format!("{}: {e}", path.display())),
+        }
+    }
+
+    let sources: Vec<ypdf_image::Source<'_>> = loaded
+        .iter()
+        .map(|(name, bytes)| ypdf_image::Source { name, bytes })
+        .collect();
+
+    let mut built = ypdf_image::to_pdf(&sources, &options)?;
+    for warning in &built.warnings {
+        out.note(warning.message());
+    }
+
+    let bytes = built.pdf.to_bytes()?;
+    paths::write(&args.output, &bytes, overwrite)?;
+
+    let bytes_in: u64 = files
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .sum();
+
+    Ok(FileReport {
+        human: format!(
+            "{} image(s) → {} ({} page(s), {})",
+            built.pages,
+            args.output.display(),
+            built.pages,
+            ypdf_optimize::format_size(bytes.len() as u64)
+        ),
+        json: json!({
+            "inputs": files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+            "output": args.output.display().to_string(),
+            "pages": built.pages,
+            "bytes": bytes.len(),
+            "warnings": built.warnings.iter().map(ypdf_image::Warning::message).collect::<Vec<_>>(),
+        }),
+        bytes_in,
+        bytes_out: bytes.len() as u64,
+        // A picture that could not be read is exactly the kind of thing a
+        // script wants to notice.
+        flagged: !built.warnings.is_empty(),
+    })
+}
+
+/// Turn the flags into a placement.
+pub fn options_from(args: &ImagesToPdfArgs) -> Result<ypdf_image::Options> {
+    let fit = match &args.page {
+        Some(name) => ypdf_image::PageFit::Fixed {
+            size: ypdf_image::PageSize::parse(name)?,
+            margin: args.margin,
+        },
+        None => {
+            if args.dpi <= 0.0 {
+                return Err(Error::Config {
+                    detail: "--dpi needs a value above zero".into(),
+                    source_path: None,
+                });
+            }
+            ypdf_image::PageFit::Image { dpi: args.dpi }
+        }
+    };
+
+    Ok(ypdf_image::Options {
+        fit,
+        // Turning the paper is only a question for a fixed page, and it is what
+        // someone wants far more often than not, so it is the default and the
+        // flag turns it off.
+        auto_orient: !args.no_auto_orient,
+    })
 }
 
 #[cfg(test)]

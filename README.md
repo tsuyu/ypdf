@@ -71,6 +71,35 @@ packages — see [.github/workflows/ci.yml](.github/workflows/ci.yml).
 If PDFium cannot be found, the application says so at startup and lists every
 path it searched. `YPDF_PDFIUM_PATH` overrides the search.
 
+## Windows Server
+
+`ypdf-cli.exe` runs on a server that nobody has prepared. Release archives are
+built against the static C runtime, so the binaries import only DLLs Windows
+ships with — no Visual C++ redistributable, and nothing to install but the
+unzipped folder. That holds on Server Core too: PDFium needs `gdi32` and
+`user32`, which Server Core has, and never opens a window.
+
+Unzip the release, keep `vendor/` beside the executables, and run it:
+
+```powershell
+C:\ypdf\ypdf-cli.exe compress \\fileserver\invoices\*.pdf -o D:\out\ --preset "Email PDF"
+```
+
+Building on the server rather than unzipping a release? Build the same way the
+release does, or the binaries will want a runtime that is not there:
+
+```powershell
+$env:RUSTFLAGS = "-C target-feature=+crt-static"
+cargo build --release --target x86_64-pc-windows-msvc
+```
+
+The desktop application is a different matter. `ypdf.exe` needs a desktop
+session with OpenGL 3.3, and a server with no graphics driver offers the
+generic GDI renderer at OpenGL 1.1, while Remote Desktop usually offers no
+acceleration at all. Where that is the case the window does not open, and
+yPDF says so in a dialog rather than exiting silently. Everything the viewer
+does to a file is in the command line as well.
+
 ## Keyboard
 
 | Key | Action |
@@ -145,6 +174,8 @@ ypdf-cli pages report.pdf --delete --pages 3 -o shorter.pdf
 ypdf-cli pages deck.pdf --order 12,1-11 -o reordered.pdf
 ypdf-cli compress ./invoices/*.pdf -o ./small/ --preset "Email PDF"
 ypdf-cli images scan.pdf -o images/
+ypdf-cli images-to-pdf receipts/*.jpg -o receipts.pdf
+ypdf-cli images-to-pdf photo-*.png -o album.pdf --page a4 --margin 24
 ypdf-cli metadata report.pdf --set-title "Q1 Results" --overwrite
 ypdf-cli encrypt report.pdf -o protected.pdf --user-password s3cret --no-copy
 ypdf-cli decrypt protected.pdf -o plain.pdf --password s3cret
@@ -160,6 +191,11 @@ ypdf-cli links ./inbox/*.pdf --json
 ypdf-cli security-scan ./inbox/*.pdf --fail-on high
 ypdf-cli diagnostics broken.pdf --json
 ```
+
+`images-to-pdf` is the other direction from `images`: pictures in, one page each.
+Without `--page` the page *is* the picture at `--dpi`, which is what a scan wants;
+with it every page is the same paper, scaled to fit inside the margin. JPEG bytes
+are embedded as they are rather than re-encoded, so nothing is lost on the way in.
 
 `pages` does one rearrangement per run — `--rotate`, `--delete`, `--duplicate`,
 `--order`, `--move`, or `--reverse`. Two at once is refused rather than guessed at:

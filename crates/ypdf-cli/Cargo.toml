@@ -17,6 +17,7 @@ workspace = true
 [dependencies]
 ypdf-core = { path = "../ypdf-core" }
 ypdf-doc = { path = "../ypdf-doc" }
+ypdf-image = { path = "../ypdf-image" }
 ypdf-optimize = { path = "../ypdf-optimize" }
 ypdf-security = { path = "../ypdf-security" }
 ypdf-crypt = { path = "../ypdf-crypt" }

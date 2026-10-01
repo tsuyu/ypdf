@@ -80,6 +80,14 @@ fn run(cli: &Cli, out: &Out) -> Result<i32> {
             emit_single(out, cli.command.name(), &report);
             Ok(0)
         }
+        Command::ImagesToPdf(args) => {
+            // Many pictures, one document: the inputs are pages, not files to
+            // be processed independently, so this is not a batch run.
+            let files = batch::expand(&args.inputs)?;
+            let report = commands::optimize::images_to_pdf(&files, args, overwrite, &cancel, out)?;
+            emit_single(out, cli.command.name(), &report);
+            Ok(0)
+        }
         Command::Extract(args) => {
             let report = commands::pages::extract(args, password, overwrite, &cancel)?;
             emit_single(out, cli.command.name(), &report);
@@ -228,6 +236,7 @@ fn run_batch(
         Command::Merge(_)
         | Command::Split(_)
         | Command::Extract(_)
+        | Command::ImagesToPdf(_)
         | Command::Ocr(_)
         | Command::Markdown(_)
         | Command::Docx(_)
@@ -254,6 +263,7 @@ fn inputs_of(command: &Command) -> &[String] {
         Command::Compress(args) => &args.inputs,
         Command::Pages(args) => &args.inputs,
         Command::Images(args) => &args.inputs,
+        Command::ImagesToPdf(args) => &args.inputs,
         Command::Watermark(args) => &args.inputs,
         Command::Encrypt(args) => &args.inputs,
         Command::Decrypt(args) => &args.inputs,

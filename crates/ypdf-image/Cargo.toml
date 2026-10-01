@@ -1,6 +1,6 @@
 [package]
-name = "ypdf-doc"
-description = "PDF structure operations: pages, merge, split, metadata."
+name = "ypdf-image"
+description = "Images into PDF pages: one picture per page, or a contact sheet."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,11 +11,13 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-flate2 = "1.1.9"
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+    "tiff",
+    "webp",
+] }
 lopdf = "0.44.0"
 tracing = "0.1.44"
 ypdf-core = { path = "../ypdf-core" }
-
-[dev-dependencies]
-lopdf = "0.44.0"
+ypdf-doc = { path = "../ypdf-doc" }

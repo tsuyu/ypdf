@@ -28,7 +28,18 @@
     Where the archive is written. Defaults to dist/.
 
 .PARAMETER SkipBuild
-    Package whatever is already in target/release. For iterating on packaging.
+    Package whatever was already built. For iterating on packaging.
+
+.PARAMETER DynamicCrt
+    Link the Microsoft C runtime dynamically, as cargo does by default.
+
+    The default here is the static CRT instead, which is what makes the release
+    run on a machine nobody has prepared. A dynamic build imports
+    VCRUNTIME140.dll, which is absent from a fresh Windows Server: the binaries
+    fail at start with a missing-DLL box until someone installs the Visual C++
+    redistributable. Static linking costs about 100 KB per binary and removes
+    that prerequisite. PDFium is unaffected either way — it carries its own
+    runtime and imports none.
 
 .EXAMPLE
     ./scripts/package.ps1
@@ -40,7 +51,8 @@ param(
     [string]$Version,
     [string]$Target = "x86_64-pc-windows-msvc",
     [string]$OutDir = "dist",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$DynamicCrt
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,12 +78,29 @@ try {
         throw "no vendored PDFium for $Target. vendor/pdfium holds: $have"
     }
 
+    # An explicit --target keeps the CRT flags off build scripts and proc
+    # macros, which cannot be built against a static CRT; it also puts the
+    # output under target/<triple>/ rather than target/.
+    $built = Join-Path $root "target/$Target/release"
+
     if (-not $SkipBuild) {
-        Write-Host "building $Version for $Target" -ForegroundColor Cyan
-        # --locked so a release never silently picks up a dependency the
-        # committed Cargo.lock does not name.
-        & cargo build --release --locked
-        if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+        $crt = if ($DynamicCrt) { "dynamic" } else { "static" }
+        Write-Host "building $Version for $Target ($crt CRT)" -ForegroundColor Cyan
+
+        $previous = $env:RUSTFLAGS
+        if (-not $DynamicCrt) {
+            $env:RUSTFLAGS = (@($env:RUSTFLAGS, "-C target-feature=+crt-static") |
+                              Where-Object { $_ }) -join " "
+        }
+        try {
+            # --locked so a release never silently picks up a dependency the
+            # committed Cargo.lock does not name.
+            & cargo build --release --locked --target $Target
+            if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+        }
+        finally {
+            $env:RUSTFLAGS = $previous
+        }
     }
 
     $name = "ypdf-$Version-$Target"
@@ -80,9 +109,9 @@ try {
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
     foreach ($exe in @("ypdf.exe", "ypdf-cli.exe")) {
-        $built = Join-Path $root "target/release/$exe"
-        if (-not (Test-Path $built)) { throw "$exe was not built: $built" }
-        Copy-Item $built (Join-Path $stage $exe)
+        $from = Join-Path $built $exe
+        if (-not (Test-Path $from)) { throw "$exe was not built: $from" }
+        Copy-Item $from (Join-Path $stage $exe)
     }
 
     $vendorRoot = Join-Path $stage "vendor/pdfium/$Target"

@@ -32,15 +32,14 @@
 //! # }
 //! ```
 
-mod image_xobject;
 mod metrics;
 mod stamp;
 
 use ypdf_core::{Error, Result};
 use ypdf_doc::Pdf;
 
-pub use image_xobject::ImageKind;
 pub use metrics::Face;
+pub use ypdf_doc::ImageKind;
 
 /// Where on the page the watermark sits.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -113,6 +113,9 @@ pub enum Command {
     /// Write every embedded image out as a file (spec §6).
     Images(ImagesArgs),
 
+    /// Combine pictures into one PDF, a page each (spec §6).
+    ImagesToPdf(ImagesToPdfArgs),
+
     /// Protect a document with a password and permission flags (spec §8).
     Encrypt(EncryptArgs),
 
@@ -180,6 +183,7 @@ impl Command {
             Self::Pages(_) => "pages",
             Self::Compress(_) => "compress",
             Self::Images(_) => "images",
+            Self::ImagesToPdf(_) => "images-to-pdf",
             Self::Encrypt(_) => "encrypt",
             Self::Decrypt(_) => "decrypt",
             Self::Ocr(_) => "ocr",
@@ -461,6 +465,37 @@ pub struct ImagesArgs {
     /// a subdirectory named after it when there is more than one.
     #[arg(short, long, value_name = "DIR")]
     pub output: PathBuf,
+}
+
+/// `images-to-pdf`.
+#[derive(Clone, Debug, Args)]
+pub struct ImagesToPdfArgs {
+    /// The pictures, in the order they should appear. Globs are expanded and
+    /// sorted, so `scan-*.jpg` comes out in the order the names imply.
+    #[arg(required = true, value_name = "IMAGE")]
+    pub inputs: Vec<String>,
+
+    /// Where to write the PDF.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: PathBuf,
+
+    /// Paper to use: a4, letter, legal. Without this the page is the picture
+    /// itself, sized by `--dpi`.
+    #[arg(long, value_name = "SIZE")]
+    pub page: Option<String>,
+
+    /// Blank border on a fixed page, in points (72 to the inch).
+    #[arg(long, value_name = "POINTS", default_value_t = 36.0)]
+    pub margin: f32,
+
+    /// Resolution when the page is the picture. 300 is a scan; 72 means one
+    /// pixel per point.
+    #[arg(long, value_name = "DPI", default_value_t = 300.0)]
+    pub dpi: f32,
+
+    /// Keep the paper upright even for a picture wider than it is tall.
+    #[arg(long)]
+    pub no_auto_orient: bool,
 }
 
 /// `encrypt`.

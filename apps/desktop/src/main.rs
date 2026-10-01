@@ -15,6 +15,7 @@ mod document;
 mod edit;
 mod export;
 mod forms;
+mod images;
 mod inspect;
 mod merge;
 mod ocr;
@@ -64,10 +65,48 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let result = eframe::run_native(
         "yPDF",
         native_options,
         Box::new(move |cc| Ok(Box::new(app::YpdfApp::new(cc, config, render, open)))),
+    );
+
+    if let Err(error) = &result {
+        report_window_failure(&error.to_string());
+    }
+    result
+}
+
+/// Say out loud that the window never opened.
+///
+/// A release build has no console (`windows_subsystem = "windows"`), so an
+/// `Err` out of `run_native` is invisible: the process exits and nothing
+/// appears on screen at all. That is exactly the failure on a Windows Server
+/// with no graphics driver, where the generic GDI OpenGL is 1.1 and the
+/// renderer wants 3.3, and often over Remote Desktop as well.
+///
+/// The message goes to a plain Win32 dialog, which needs no OpenGL of its own,
+/// and to the log for whoever reads it afterwards.
+fn report_window_failure(detail: &str) {
+    let message = window_failure_message(detail);
+    tracing::error!("{message}");
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("yPDF")
+        .set_description(&message)
+        .show();
+}
+
+/// What to tell someone whose window did not open.
+fn window_failure_message(detail: &str) -> String {
+    format!(
+        "yPDF could not open its window.\n\n\
+         {detail}\n\n\
+         The viewer needs a desktop session with OpenGL 3.3. A Windows Server \
+         with no graphics driver, and a Remote Desktop session without \
+         acceleration, usually provide neither.\n\n\
+         Everything the viewer does to a file - convert, merge, split, rotate, \
+         compress, redact - is also in ypdf-cli.exe, which needs no display."
     )
 }
 
@@ -88,4 +127,23 @@ fn fatal_on_error<T>(result: Result<T, Error>) -> T {
 /// workspace expects (spec §30).
 fn project_dir() -> Option<PathBuf> {
     std::env::current_dir().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::window_failure_message;
+
+    #[test]
+    fn the_failure_message_keeps_the_error_and_offers_the_cli() {
+        let message = window_failure_message("NoGlutinConfigs(...)");
+        assert!(
+            message.contains("NoGlutinConfigs(...)"),
+            "the real error has to survive: {message}"
+        );
+        assert!(
+            message.contains("ypdf-cli.exe"),
+            "someone stuck on a server needs to be told what still works"
+        );
+        assert!(message.contains("OpenGL 3.3"), "{message}");
+    }
 }

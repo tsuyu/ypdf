@@ -17,6 +17,7 @@
 //! ```
 
 mod diagnostics;
+pub mod image_xobject;
 mod metadata;
 mod pdf;
 mod spec;
@@ -24,6 +25,7 @@ mod split;
 pub mod winansi;
 
 pub use diagnostics::{Diagnostics, Issue, Severity};
+pub use image_xobject::{ImageKind, Placed};
 pub use metadata::{Metadata, MetadataEdit, decode_text, encode_text, format_date};
 pub use pdf::{Encryption, Pdf};
 pub use spec::PageSpec;
